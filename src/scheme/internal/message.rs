@@ -1,8 +1,10 @@
 use serde::{ Serialize, Deserialize };
 
+use super::{ Request, Reply};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Message<Req, Rep, Event> {
-    Request{ id: usize, data:Req },
-    Reply{ id: usize, data:Rep },
+    Request(Request<Req>),
+    Reply(Reply<Rep>),
     Event(Event),
 }

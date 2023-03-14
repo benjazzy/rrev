@@ -1,5 +1,6 @@
-mod message;
+pub mod internal;
+mod request;
 mod requestable;
 
-pub use message::Message;
+pub use request::Request;
 pub use requestable::Requestable;
