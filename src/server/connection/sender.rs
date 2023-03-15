@@ -110,7 +110,7 @@ mod tests {
     use crate::server::connection::internal_hdl;
     use crate::server::connection::sender::SenderHdl;
 
-    pub async fn client(addr: String, tx: mpsc::Sender<String>) {
+    async fn client(addr: String, tx: mpsc::Sender<String>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str())
             .expect("Error parsing url.");
 
@@ -128,7 +128,7 @@ mod tests {
         }
     }
 
-    pub async fn socket() -> (TcpListener, String) {
+    async fn socket() -> (TcpListener, String) {
         let socket = TcpListener::bind("127.0.0.1:0").await
             .expect("Error binding on socket address");
         let addr = socket.local_addr()
@@ -137,7 +137,7 @@ mod tests {
         (socket, addr.to_string())
     }
 
-    pub async fn server(socket: TcpListener) -> SenderHdl<String> {
+    async fn server(socket: TcpListener) -> SenderHdl<String> {
         let (internal_tx, internal_rx)
             = mpsc::channel(1);
 
@@ -158,7 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    pub async fn check_sender() {
+    async fn check_sender() {
         let message = "test";
         let request = Request{ id: 0, data: message.to_string() };
         let (client_tx, mut client_rx) = mpsc::channel(1);
@@ -170,7 +170,7 @@ mod tests {
         sender_hdl.request(request.clone()).await;
 
         let client_message =
-            tokio::time::timeout(Duration::from_millis(10000000), client_rx.recv())
+            tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
                 .await.expect("Timeout getting message.")
                 .expect("Empty message");
 
