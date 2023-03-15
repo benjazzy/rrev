@@ -5,7 +5,7 @@ use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tracing::{debug, error};
 
 use super::internal_hdl;
@@ -14,6 +14,12 @@ enum ReceiverMessage {
     Close,
 }
 
+/// Receiver handles the stream side of a split websocket.
+/// It listens for messages on the websocket stream deserializes it
+/// and calls Connection's internal handle to pass the message up the chain.
+/// If the websocket message is a close message or unhandleable error Receiver
+/// calls close on Connection's internal handle to close the connection.
+/// Receiver also waits for a message from Connection and handles the message.
 struct Receiver<
     Req: for<'a> Deserialize<'a>,
     Rep: for<'a> Deserialize<'a>,
@@ -51,7 +57,7 @@ impl<
                     }
                 },
                 Some(message) = self.ws_receiver.next() => {
-
+                    self.handle_ws_message(message).await;
                 }
 
             }
@@ -67,7 +73,22 @@ impl<
         };
     }
 
-    async fn handle_ws_message(&self, message: Message) {
+    async fn handle_ws_message(&self, try_message: Result<Message, tungstenite::Error>) {
+        let message = match try_message {
+            Ok(m) => m,
+            Err(e) => {
+                use tungstenite::Error;
+                match e {
+                    Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => {
+                        debug!("Receiver connection closed.");
+                        self.connection_handle.close().await;
+                    },
+                    _ => { error!("Receiver websocket error! {e}"); },
+                };
+                return;
+            }
+        };
+
         let message_str = if let Ok(m) = message.to_text() {
             m
         } else {
@@ -116,7 +137,7 @@ mod tests {
     use crate::scheme::internal;
     use crate::server::connection::internal_hdl;
     use crate::server::connection::internal_hdl::InternalMessage;
-    use crate::server::connection::receiver::{Receiver, ReceiverHdl};
+    use crate::server::connection::receiver::ReceiverHdl;
 
     async fn client(addr: String, mut rx: mpsc::Receiver<Option<String>>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str())
@@ -174,7 +195,7 @@ mod tests {
             .expect("Timeout unwrapping receiver message.")
             .expect("Problem unwrapping receiver message.");
 
-        assert_eq!(receiver_message, internal_hdl::InternalMessage::NewMessage(message));
+        assert_eq!(receiver_message, InternalMessage::NewMessage(message));
     }
 
     #[tokio::test]
@@ -187,7 +208,7 @@ mod tests {
 
         let (socket, addr) = socket().await;
         tokio::spawn(client(addr, client_rx));
-        let (receiver_hdl, mut connection_rx) = server(socket).await;
+        let (_receiver_hdl, mut connection_rx) = server(socket).await;
 
         try_message(request, client_tx.clone(), &mut connection_rx).await;
         try_message(reply, client_tx.clone(), &mut connection_rx).await;

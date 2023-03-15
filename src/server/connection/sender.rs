@@ -16,7 +16,11 @@ pub enum SenderMessage<T> {
     Close,
 }
 
-pub struct Sender<T: Serialize> {
+/// Sender handles the sink side of a split websocket.
+/// Sender listens for messages sent from a handler and then serializes them
+/// and passes them onto the websocket sink.
+/// If a SenderMessage::Close is sent Sender will close its sink and shutdown.
+struct Sender<T: Serialize> {
     connection_hdl: internal_hdl::InternalHdl<(), (), ()>,
     rx: mpsc::Receiver<SenderMessage<T>>,
     ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
@@ -69,7 +73,7 @@ impl<T: Serialize> Sender<T> {
         };
 
         if let Err(e) = self.ws_sender.send(Message::Text(message_str)).await {
-
+            error!("Problem sending websocket message. {e}");
         }
     }
 }
@@ -93,7 +97,7 @@ impl<T: Serialize + Send + 'static> SenderHdl<T> {
     }
 
     pub async fn request(&self, req: Request<T>) {
-        let r = self.tx.send(SenderMessage::Req(req)).await;
+        let _ = self.tx.send(SenderMessage::Req(req)).await;
     }
 }
 
@@ -104,8 +108,6 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_tungstenite::connect_async;
-    use crate::scheme;
-    use crate::scheme::internal;
     use crate::scheme::internal::Request;
     use crate::server::connection::internal_hdl;
     use crate::server::connection::sender::SenderHdl;
@@ -138,7 +140,7 @@ mod tests {
     }
 
     async fn server(socket: TcpListener) -> SenderHdl<String> {
-        let (internal_tx, internal_rx)
+        let (internal_tx, _internal_rx)
             = mpsc::channel(1);
 
         let internal_hdl = internal_hdl::InternalHdl::new(internal_tx);

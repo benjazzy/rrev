@@ -18,7 +18,7 @@ impl<Req, Rep, Event> InternalHdl<Req, Rep, Event> {
         InternalHdl { tx }
     }
     
-    pub async fn close(self) {
+    pub async fn close(&self) {
         let _ = self.tx.send(InternalMessage::Close).await;
     }
 
