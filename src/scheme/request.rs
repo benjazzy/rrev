@@ -1,6 +1,7 @@
 use serde::Serialize;
+use crate::Requestable;
 
-pub struct Request<T: Serialize> {
+pub struct Request<T: Requestable> {
     pub to: String,
     pub data: T
 }
