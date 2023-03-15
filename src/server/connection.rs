@@ -132,7 +132,35 @@ impl<
     async fn handle_internal(&mut self, message: InternalMessage<TheirReq, TheirRep, TheirEvent>)
         -> ControlFlow<()>
     {
-        todo!()
+        match message {
+            InternalMessage::Close => {
+                self.close();
+                return ControlFlow::Break(());
+            }
+            InternalMessage::NewMessage(message) => {
+                self.handle_internal_new_message(message).await;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    async fn handle_internal_new_message(&mut self, message: internal::Message<TheirReq, TheirRep, TheirEvent>) {
+        match message {
+            internal::Message::Request(request) => { todo!() }
+            internal::Message::Reply(reply) => { self.handle_internal_reply(reply).await }
+            internal::Message::Event(event) => {}
+        }
+    }
+
+    async fn handle_internal_reply(&mut self, reply: internal::Reply<TheirRep>) {
+        if let Some(tx) = self.reply_map.remove(&reply.id) {
+            if let Err(_) = tx.send(reply.data) {
+                warn!("Problem sending reply back to requester");
+            };
+        } else {
+            warn!("No request id matches reply id.");
+        };
     }
 
     async fn send_request(&mut self, data: OurReq, tx: oneshot::Sender<TheirRep>) {
@@ -145,7 +173,7 @@ impl<
         self.reply_map.insert(id, tx);
 
         let request = internal::Message::Request(internal::Request::<OurReq>{ id, data });
-        self.sender_hdl.send(request);
+        self.sender_hdl.send(request).await;
     }
 
     async fn close(&mut self) {
@@ -156,22 +184,31 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::io::BufRead;
     use std::time::Duration;
-    use futures_util::StreamExt;
-    use tokio::net::TcpListener;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
-    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
     use crate::scheme::internal;
+    use crate::server::connection::connection_hdl::RequestError;
     use crate::server::connection::ConnectionHdl;
 
     type ConHdlType = ConnectionHdl<String, String, String, String>;
 
-    async fn client(addr: String, tx: mpsc::Sender<String>) {
+    async fn client(addr: String) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
         let url = url::Url::parse(format!("ws://{addr}").as_str())
             .expect("Error parsing url.");
 
         let (ws_stream, _) = connect_async(url).await
             .expect("Error connecting to the server.");
+
+        ws_stream
+    }
+
+    async fn send_client(addr: String, tx: mpsc::Sender<String>) {
+        let ws_stream = client(addr).await;
 
         let (_, mut read) = ws_stream.split();
         while let Some(message) = read.next().await {
@@ -182,6 +219,24 @@ mod tests {
                 Err(_) => break,
             }
         }
+    }
+
+    async fn responsive_client(addr: String, responses: HashMap<String, String>) {
+        let ws_stream = client(addr).await;
+        let (mut send, mut read) = ws_stream.split();
+
+        while let Some(message) = read.next().await {
+            match message {
+                Ok(m) => {
+                    assert!(m.is_text());
+                    let m_str = m.to_text().unwrap();
+                    assert!(responses.contains_key(m_str));
+                    send.send(tungstenite::Message::Text(responses.get(m_str).unwrap().clone())).await.unwrap();
+                },
+                Err(e) => {},
+            }
+        }
+
     }
 
     async fn socket() -> (TcpListener, String) {
@@ -207,13 +262,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn check_timeout() {
+        let message = "test";
+        let request = internal::Message::<String, String, String>::Request(
+            internal::Request { id: 0, data: message.to_string() }
+        );
+
+        let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (socket, addr) = socket().await;
+        tokio::spawn(send_client(addr, client_tx));
+        let connection_hdl = server(socket).await;
+
+        let timeout = connection_hdl.request_timeout(
+            message.to_string(),
+            Duration::from_millis(10),
+        ).await;
+
+        // Assert that the request timed out.
+        assert_eq!(Err(RequestError::Timeout), timeout);
+
+        // Assert the the Connection did send the message.
+        assert_eq!(
+            client_rx.recv().await.expect("Problem getting message from client."),
+            serde_json::to_string(&request).expect("Problem serializing request.")
+        );
+    }
+
+    #[tokio::test]
+    async fn check_request() {
+        let message = "test";
+        let request = internal::Message::<String, String, String>::Request(
+            internal::Request { id: 0, data: message.to_string() }
+        );
+        let reply = internal::Message::Reply::<String, String, String>(
+            internal::Reply { id: 0, data: message.to_string() }
+        );
+
+        let mut requests = HashMap::new();
+        requests.insert(
+            serde_json::to_string(&request).unwrap(),
+            serde_json::to_string(&reply).unwrap()
+        );
+
+        let (socket, addr) = socket().await;
+        tokio::spawn(responsive_client(addr, requests));
+        let connection_hdl = server(socket).await;
+
+        let result = connection_hdl.request_timeout(message.to_string(), Duration::from_millis(10000)).await
+            .expect("Timeout getting request result");
+
+        assert_eq!(message, result);
+
+    }
+
+    #[tokio::test]
     async fn check_send_event() {
         let message = "test";
         let event = internal::Message::<String, String, String>::Event(message.to_string());
         let (client_tx, mut client_rx) = mpsc::channel(1);
 
         let (socket, addr) = socket().await;
-        tokio::spawn(client(addr, client_tx));
+        tokio::spawn(send_client(addr, client_tx));
         let connection_hdl = server(socket).await;
 
         connection_hdl.event(message.to_string()).await;

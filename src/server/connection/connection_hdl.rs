@@ -9,6 +9,7 @@ use tokio_tungstenite::WebSocketStream;
 
 use super::{ Connection, ConnectionMessage };
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RequestError {
     Timeout,
     Recv,
