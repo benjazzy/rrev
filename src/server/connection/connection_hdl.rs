@@ -1,9 +1,8 @@
-use std::fmt::{Display, Error, Formatter};
+use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::error::Elapsed;
 use tokio_tungstenite::WebSocketStream;
 
 use super::{ Connection, ConnectionMessage };
@@ -20,21 +19,22 @@ pub struct ConnectionHdl<
     OurReq: Serialize,
     OurRep: Serialize,
     OurEvent: Serialize,
-    TheirReply: for<'a> Deserialize<'a>
+    TheirReq: for<'a> Deserialize<'a>,
+    TheirRep: for<'a> Deserialize<'a>,
+    TheirEvent: for<'a> Deserialize<'a>
 > {
-    tx: mpsc::Sender<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReply>>
+    tx: mpsc::Sender<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>>
 }
 
 impl<
     OurReq: Serialize + Send + 'static,
     OurRep: Serialize + Send + 'static,
     OurEvent: Serialize + Send + 'static,
+    TheirReq: for<'a> Deserialize<'a> + Send + Clone + 'static,
     TheirRep: for<'a> Deserialize<'a> + Send + Clone + 'static,
-> ConnectionHdl<OurReq, OurRep, OurEvent, TheirRep> {
+    TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
+> ConnectionHdl<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> {
     pub async fn new<
-        TheirReq: for<'a> Deserialize<'a> + Send + Clone + 'static,
-        // TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-        TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static
     >(stream: WebSocketStream<TcpStream>) -> Self {
         let (tx, rx) = mpsc::channel(1);
 
@@ -67,12 +67,12 @@ impl<
         let _ = self.tx.send(ConnectionMessage::Event(event)).await;
     }
 
-    pub async fn register_request_listener<TheirReq: for<'a> Deserialize<'a>>(&mut self, tx: mpsc::Sender<TheirReq>) {
+    pub async fn register_request_listener(&self, tx: mpsc::Sender<TheirReq>) {
         todo!()
     }
 
-    pub async fn register_event_listener<TheirEvent: for<'a> Deserialize<'a>>(&mut self, tx: mpsc::Sender<TheirEvent>) {
-        todo!()
+    pub async fn register_event_listener(&self, tx: mpsc::Sender<TheirEvent>) {
+        let _ = self.tx.send(ConnectionMessage::EventListener(tx)).await;
     }
 }
 

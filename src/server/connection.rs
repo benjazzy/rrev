@@ -24,12 +24,14 @@ use sender::SenderHdl;
 use receiver::ReceiverHdl;
 use crate::server::connection::internal_hdl::{InternalHdl, InternalMessage};
 
-enum ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep> {
+enum ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> {
     Close,
     Request{ data: OurReq, tx: oneshot::Sender<Result<TheirRep, RequestError>> },
     Reply(OurRep),
     Event(OurEvent),
     Send(internal::Message<OurReq, OurRep, OurEvent>),
+    RequestListener(mpsc::Sender<TheirReq>),
+    EventListener(mpsc::Sender<TheirEvent>),
 }
 
 struct Connection<
@@ -46,7 +48,7 @@ struct Connection<
     sender_hdl: SenderHdl<OurReq, OurRep, OurEvent>,
 
     internal_rx: mpsc::Receiver<InternalMessage<TheirReq, TheirRep, TheirEvent>>,
-    rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep>>,
+    rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>>,
 
     reply_map: HashMap<usize, oneshot::Sender<Result<TheirRep, RequestError>>>,
     request_listeners: Vec<mpsc::Sender<TheirReq>>,
@@ -61,7 +63,7 @@ impl<
     TheirRep: for<'a> Deserialize<'a> + Clone + Send + 'static,
     TheirEvent: for<'a> Deserialize<'a> + Clone + Send + 'static
 > Connection<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> {
-    pub fn new(rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep>>, stream: WebSocketStream<TcpStream>) -> Self {
+    pub fn new(rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>>, stream: WebSocketStream<TcpStream>) -> Self {
         let (internal_tx, internal_rx) = mpsc::channel(1);
         let internal_hdl: InternalHdl<TheirReq, TheirRep, TheirEvent> = InternalHdl::new(internal_tx);
         let (sender, receiver) = stream.split();
@@ -106,7 +108,7 @@ impl<
         self.cancel_requests().await
     }
 
-    async fn handle_external(&mut self, message: ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep>)
+    async fn handle_external(&mut self, message: ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>)
         -> ControlFlow<()>
     {
         match message {
@@ -124,6 +126,12 @@ impl<
             },
             ConnectionMessage::Send(m) => {
                 self.sender_hdl.send(m).await;
+            }
+            ConnectionMessage::RequestListener(request_listener) => {
+                todo!()
+            }
+            ConnectionMessage::EventListener(event_listener) => {
+                self.event_listeners.push(event_listener);
             }
         }
 
@@ -149,7 +157,7 @@ impl<
         match message {
             internal::Message::Request(request) => { todo!() }
             internal::Message::Reply(reply) => { self.handle_internal_reply(reply).await }
-            internal::Message::Event(event) => {}
+            internal::Message::Event(event) => { self.handle_internal_event(event).await; }
         }
     }
 
@@ -161,6 +169,13 @@ impl<
         } else {
             warn!("No request id matches reply id.");
         };
+    }
+
+    async fn handle_internal_event(&self, event: TheirEvent) {
+        for tx in self.event_listeners.iter() {
+            let event = event.clone();
+            let _ = tx.send(event).await;
+        }
     }
 
     async fn send_request(&mut self, data: OurReq, tx: oneshot::Sender<Result<TheirRep, RequestError>>) {
@@ -205,7 +220,7 @@ mod tests {
     use crate::server::connection::connection_hdl::RequestError;
     use crate::server::connection::ConnectionHdl;
 
-    type ConHdlType = ConnectionHdl<String, String, String, String>;
+    type ConHdlType = ConnectionHdl<String, String, String, String, String, String>;
 
     async fn client(addr: String) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
         let url = url::Url::parse(format!("ws://{addr}").as_str())
@@ -226,7 +241,7 @@ mod tests {
         }
     }
 
-    async fn send_client(addr: String, tx: mpsc::Sender<String>) {
+    async fn send_back_client(addr: String, tx: mpsc::Sender<String>) {
         let ws_stream = client(addr).await;
 
         let (_, mut read) = ws_stream.split();
@@ -237,6 +252,16 @@ mod tests {
                 },
                 Err(_) => break,
             }
+        }
+    }
+
+    async fn send_to_client(addr: String, mut rx: mpsc::Receiver<String>) {
+        let ws_stream = client(addr).await;
+
+        let (mut write, _) = ws_stream.split();
+        while let Some(message) = rx.recv().await {
+            write.send(tungstenite::Message::Text(message)).await
+                .expect("Problem sending message to server.");
         }
     }
 
@@ -275,7 +300,7 @@ mod tests {
             tokio_tungstenite::accept_async(stream).await
                 .expect("Error accepting websocket stream.");
 
-        let connection_hdl = ConHdlType::new::<String, String>(ws_stream).await;
+        let connection_hdl = ConHdlType::new(ws_stream).await;
 
         connection_hdl
     }
@@ -289,7 +314,7 @@ mod tests {
 
         let (client_tx, mut client_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
-        tokio::spawn(send_client(addr, client_tx));
+        tokio::spawn(send_back_client(addr, client_tx));
         let connection_hdl = server(socket).await;
 
         let timeout = connection_hdl.request_timeout(
@@ -341,7 +366,7 @@ mod tests {
         let (client_tx, mut client_rx) = mpsc::channel(1);
 
         let (socket, addr) = socket().await;
-        tokio::spawn(send_client(addr, client_tx));
+        tokio::spawn(send_back_client(addr, client_tx));
         let connection_hdl = server(socket).await;
 
         connection_hdl.event(message.to_string()).await;
@@ -352,6 +377,30 @@ mod tests {
                 .expect("Empty message");
 
         assert_eq!(client_message.as_str(), serde_json::to_string(&event).unwrap());
+    }
+
+    #[tokio::test]
+    async fn check_recv_event() {
+        let message = "test";
+        let event = internal::Message::<String, String, String>::Event(message.to_string());
+        let event_str = serde_json::to_string(&event)
+            .expect("Problem serializing event.");
+
+        let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (server_tx, mut server_rx) = mpsc::channel(1);
+        let (socket, addr) = socket().await;
+        tokio::spawn(send_to_client(addr, client_rx));
+        let connection_hdl = server(socket).await;
+
+        connection_hdl.register_event_listener(server_tx).await;
+        client_tx.send(event_str).await;
+
+        let server_message =
+            tokio::time::timeout(Duration::from_millis(1000000), server_rx.recv())
+                .await.expect("Timeout getting message.")
+                .expect("Empty message");
+
+        assert_eq!(server_message, message);
     }
 
     #[tokio::test]
