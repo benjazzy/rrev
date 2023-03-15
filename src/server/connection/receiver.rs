@@ -189,18 +189,8 @@ mod tests {
         tokio::spawn(client(addr, client_rx));
         let (receiver_hdl, mut connection_rx) = server(socket).await;
 
-        try_message(request, client_tx.clone(), &mut connection_rx);
-
-        // client_tx.send(Some(serde_json::to_string(&request).unwrap())).await
-        //     .expect("Problem sending message.");
-        //
-        // let receiver_message = tokio::time::timeout(
-        //     Duration::from_millis(100), connection_rx.recv()).await
-        //     .expect("Timeout unwrapping receiver message.")
-        //     .expect("Problem unwrapping receiver message.");
-        //
-        // assert_eq!(receiver_message, request);
-
-        // assert_eq!(client_message, Some(serde_json::to_string(&request).unwrap()));
+        try_message(request, client_tx.clone(), &mut connection_rx).await;
+        try_message(reply, client_tx.clone(), &mut connection_rx).await;
+        try_message(event, client_tx.clone(), &mut connection_rx).await;
     }
 }
