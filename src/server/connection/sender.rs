@@ -57,13 +57,11 @@ impl<
     }
 
     pub async fn run(mut self) {
-        loop {
-            if let Some(request) = self.rx.recv().await {
-                if let ControlFlow::Break(()) = self.handle_message(request).await {
-                    break;
-                };
+        while let Some(request) = self.rx.recv().await {
+            if let ControlFlow::Break(()) = self.handle_message(request).await {
+                break;
             };
-        }
+        };
     }
 
     async fn handle_message(&mut self, message: SenderMessage<OurReq, OurRep, OurEvent>) -> ControlFlow<()> {

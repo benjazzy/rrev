@@ -54,10 +54,12 @@ impl<
                 Some(message) = self.rx.recv() => {
                     if let ControlFlow::Break(()) = self.handle_connection_message(message) {
                         break;
-                    }
+                    };
                 },
-                Some(message) = self.ws_receiver.next() => {
-                    self.handle_ws_message(message).await;
+                message = self.ws_receiver.next() => {
+                    if let ControlFlow::Break(()) = self.handle_ws_message(message).await {
+                        break;
+                    };
                 }
 
             }
@@ -73,34 +75,46 @@ impl<
         };
     }
 
-    async fn handle_ws_message(&self, try_message: Result<Message, tungstenite::Error>) {
-        let message = match try_message {
-            Ok(m) => m,
-            Err(e) => {
-                use tungstenite::Error;
-                match e {
-                    Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => {
-                        debug!("Receiver connection closed.");
-                        self.connection_handle.close().await;
-                    },
-                    _ => { error!("Receiver websocket error! {e}"); },
-                };
-                return;
+    async fn handle_ws_message(&self, try_message: Option<Result<Message, tungstenite::Error>>)
+        -> ControlFlow<()> {
+        let message = if let Some(result) = try_message {
+            match result {
+                Ok(m) => m,
+                Err(e) => {
+                    use tungstenite::Error;
+                    match e {
+                        Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => {
+                            debug!("Receiver connection closed.");
+                            self.connection_handle.close().await;
+                            return ControlFlow::Break(());
+                        },
+                        _ => {
+                            error!("Receiver websocket error! {e}");
+                            return ControlFlow::Continue(());
+                        },
+                    };
+                }
             }
+        } else {
+            debug!("Receiver got an empty message. Closing.");
+            self.connection_handle.close().await;
+            return ControlFlow::Break(());
         };
 
         let message_str = if let Ok(m) = message.to_text() {
             m
         } else {
             error!("Message is not text");
-            return;
+            return ControlFlow::Continue(());
         };
 
         let try_message = serde_json::from_str(message_str);
         match try_message {
             Ok(m) => self.connection_handle.new_message(m).await,
             Err(e) => error!("Problem deserializing message! {e}"),
-        }
+        };
+
+        ControlFlow::Continue(())
     }
 }
 

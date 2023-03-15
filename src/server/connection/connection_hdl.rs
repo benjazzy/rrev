@@ -3,16 +3,16 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio::sync::oneshot::error::RecvError;
 use tokio::time::error::Elapsed;
 use tokio_tungstenite::WebSocketStream;
 
 use super::{ Connection, ConnectionMessage };
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum RequestError {
     Timeout,
-    Recv,
+    Recv(oneshot::error::RecvError),
+    Closed,
 }
 
 #[derive(Clone)]
@@ -21,9 +21,6 @@ pub struct ConnectionHdl<
     OurRep: Serialize,
     OurEvent: Serialize,
     TheirReply: for<'a> Deserialize<'a>
-    // TheirReq: for<'a> Deserialize<'a>,
-    // TheirRep: for<'a> Deserialize<'a>,
-    // TheirEvent: for<'a> Deserialize<'a>
 > {
     tx: mpsc::Sender<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReply>>
 }
@@ -53,7 +50,10 @@ impl<
         let (tx, rx) = oneshot::channel();
         let _ = self.tx.send(ConnectionMessage::Request {data: request, tx}).await;
 
-        rx.await.map_err(|_| RequestError::Recv)
+        match rx.await {
+            Ok(r) => r,
+            Err(e) => Err(RequestError::Recv(e))
+        }
     }
 
     pub async fn request_timeout(&self, request: OurReq, timeout: Duration) -> Result<TheirRep, RequestError> {
@@ -81,7 +81,8 @@ impl Display for RequestError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let message = match self {
             RequestError::Timeout => { "The request did not get a reply before the timeout." }
-            RequestError::Recv => { "The request failed to get a reply" }
+            RequestError::Recv(e) => { "The request failed to get a reply {e}" }
+            RequestError::Closed => { "The connection was closed before the request could be completed." }
         };
         write!(f, "{message}")
     }

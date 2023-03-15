@@ -19,14 +19,14 @@ use tracing::{debug, warn};
 use crate::scheme;
 use crate::scheme::internal;
 
-pub use connection_hdl::ConnectionHdl;
+pub use connection_hdl::{ ConnectionHdl, RequestError };
 use sender::SenderHdl;
 use receiver::ReceiverHdl;
 use crate::server::connection::internal_hdl::{InternalHdl, InternalMessage};
 
 enum ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep> {
     Close,
-    Request{ data: OurReq, tx: oneshot::Sender<TheirRep> },
+    Request{ data: OurReq, tx: oneshot::Sender<Result<TheirRep, RequestError>> },
     Reply(OurRep),
     Event(OurEvent),
     Send(internal::Message<OurReq, OurRep, OurEvent>),
@@ -48,7 +48,7 @@ struct Connection<
     internal_rx: mpsc::Receiver<InternalMessage<TheirReq, TheirRep, TheirEvent>>,
     rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep>>,
 
-    reply_map: HashMap<usize, oneshot::Sender<TheirRep>>,
+    reply_map: HashMap<usize, oneshot::Sender<Result<TheirRep, RequestError>>>,
     request_listeners: Vec<mpsc::Sender<TheirReq>>,
     event_listeners: Vec<mpsc::Sender<TheirEvent>>,
 }
@@ -96,12 +96,14 @@ impl<
             };
 
             // If we got a close message from either an internal or external message then close.
-            if let ControlFlow::Break(_) = control {
+            if let ControlFlow::Break(()) = control {
                 break;
             }
         }
 
         debug!("Connection closing.");
+        self.close().await;
+        self.cancel_requests().await
     }
 
     async fn handle_external(&mut self, message: ConnectionMessage<OurReq, OurRep, OurEvent, TheirRep>)
@@ -118,7 +120,6 @@ impl<
                 todo!()
             }
             ConnectionMessage::Close => {
-                self.close().await;
                 return ControlFlow::Break(());
             },
             ConnectionMessage::Send(m) => {
@@ -134,7 +135,6 @@ impl<
     {
         match message {
             InternalMessage::Close => {
-                self.close();
                 return ControlFlow::Break(());
             }
             InternalMessage::NewMessage(message) => {
@@ -155,7 +155,7 @@ impl<
 
     async fn handle_internal_reply(&mut self, reply: internal::Reply<TheirRep>) {
         if let Some(tx) = self.reply_map.remove(&reply.id) {
-            if let Err(_) = tx.send(reply.data) {
+            if let Err(_) = tx.send(Ok(reply.data)) {
                 warn!("Problem sending reply back to requester");
             };
         } else {
@@ -163,7 +163,7 @@ impl<
         };
     }
 
-    async fn send_request(&mut self, data: OurReq, tx: oneshot::Sender<TheirRep>) {
+    async fn send_request(&mut self, data: OurReq, tx: oneshot::Sender<Result<TheirRep, RequestError>>) {
         let id = self.next_id;
         self.next_id += 1;
         if self.reply_map.contains_key(&id) {
@@ -176,9 +176,19 @@ impl<
         self.sender_hdl.send(request).await;
     }
 
+    async fn cancel_requests(&mut self) {
+        let keys:Vec<usize> = self.reply_map.iter().map(|(key, _)| *key).collect();
+
+        for key in keys.iter() {
+            if let Some(tx) = self.reply_map.remove(key) {
+                let _ = tx.send(Err(RequestError::Closed));
+            }
+        }
+    }
+
     async fn close(&mut self) {
-        self.receiver_hdl.close();
-        self.sender_hdl.close();
+        self.receiver_hdl.close().await;
+        self.sender_hdl.close().await;
     }
 }
 
@@ -205,6 +215,15 @@ mod tests {
             .expect("Error connecting to the server.");
 
         ws_stream
+    }
+
+    async fn close_client(addr: String) {
+        let ws_stream = client(addr).await;
+
+        let (mut write, mut read) = ws_stream.split();
+        if let Some(message) = read.next().await {
+            write.close().await.expect("Problem closing connection");
+        }
     }
 
     async fn send_client(addr: String, tx: mpsc::Sender<String>) {
@@ -333,5 +352,22 @@ mod tests {
                 .expect("Empty message");
 
         assert_eq!(client_message.as_str(), serde_json::to_string(&event).unwrap());
+    }
+
+    #[tokio::test]
+    async fn check_close_request() {
+        let message = "test";
+
+        let (socket, addr) = socket().await;
+        tokio::spawn(close_client(addr));
+        let connection_hdl = server(socket).await;
+
+        let close = connection_hdl.request_timeout(
+            message.to_string(),
+            Duration::from_millis(100),
+        ).await;
+
+        // Assert that the request failed because of a close.
+        assert_eq!(Err(RequestError::Closed), close);
     }
 }
