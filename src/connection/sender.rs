@@ -131,9 +131,9 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use crate::scheme::internal;
     use crate::scheme::internal::Request;
-    use crate::server::connection::internal_hdl;
-    use crate::server::connection::internal_hdl::InternalHdl;
-    use crate::server::connection::sender::SenderHdl;
+    use crate::connection::internal_hdl;
+    use crate::connection::internal_hdl::InternalHdl;
+    use crate::connection::sender::SenderHdl;
 
     async fn client(addr: String, tx: mpsc::Sender<String>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str())

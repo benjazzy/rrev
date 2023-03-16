@@ -20,9 +20,9 @@ use crate::scheme;
 use crate::scheme::internal;
 
 pub use connection_hdl::{ ConnectionHdl, RequestError };
-use sender::SenderHdl;
+pub use sender::SenderHdl;
 use receiver::ReceiverHdl;
-use crate::server::connection::internal_hdl::{InternalHdl, InternalMessage};
+use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
 
 enum ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> {
     Close,
@@ -217,8 +217,8 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_tungstenite::{connect_async, MaybeTlsStream, tungstenite, WebSocketStream};
     use crate::scheme::internal;
-    use crate::server::connection::connection_hdl::RequestError;
-    use crate::server::connection::ConnectionHdl;
+    use crate::connection::connection_hdl::RequestError;
+    use crate::connection::ConnectionHdl;
 
     type ConHdlType = ConnectionHdl<String, String, String, String, String, String>;
 

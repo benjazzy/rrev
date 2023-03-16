@@ -3,6 +3,7 @@ mod event;
 mod request;
 mod reply;
 mod requestable;
+mod request_handle;
 
 pub use event::Event;
 pub use request::Request;
