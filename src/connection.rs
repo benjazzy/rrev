@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, warn};
 
 use crate::scheme;
@@ -79,7 +79,7 @@ impl<
         rx: mpsc::Receiver<
             ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
         >,
-        stream: WebSocketStream<TcpStream>,
+        stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Self {
         let (internal_tx, internal_rx) = mpsc::channel(1);
         let internal_hdl: InternalHdl<TheirReq, TheirRep, TheirEvent> =
@@ -363,7 +363,9 @@ mod tests {
     async fn server(socket: TcpListener) -> ConHdlType {
         let (stream, _) = socket.accept().await.expect("Error accepting connection.");
 
-        let ws_stream = tokio_tungstenite::accept_async(stream)
+        let maybe_tls = MaybeTlsStream::Plain(stream);
+
+        let ws_stream = tokio_tungstenite::accept_async(maybe_tls)
             .await
             .expect("Error accepting websocket stream.");
 
