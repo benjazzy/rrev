@@ -6,7 +6,7 @@ use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::error;
 
 use super::internal_hdl;
@@ -31,7 +31,7 @@ struct Sender<
 > {
     connection_hdl: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
     rx: mpsc::Receiver<SenderMessage<OurReq, OurRep, OurEvent>>,
-    ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
+    ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
 }
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ impl<
     pub fn new(
         connection_handle: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
         rx: mpsc::Receiver<SenderMessage<OurReq, OurRep, OurEvent>>,
-        ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
+        ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     ) -> Self {
         Sender {
             connection_hdl: connection_handle,
@@ -112,7 +112,7 @@ impl<
         TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
     >(
         connection_handle: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
-        ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
+        ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1);
         let sender = Sender::new(connection_handle, rx, ws_sender);
@@ -150,7 +150,7 @@ mod tests {
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
-    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::{connect_async, MaybeTlsStream};
 
     async fn client(addr: String, tx: mpsc::Sender<String>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");
@@ -188,7 +188,9 @@ mod tests {
 
         let (stream, _) = socket.accept().await.expect("Error accepting connection.");
 
-        let ws_stream = tokio_tungstenite::accept_async(stream)
+        let maybe_tls = MaybeTlsStream::Plain(stream);
+
+        let ws_stream = tokio_tungstenite::accept_async(maybe_tls)
             .await
             .expect("Error accepting websocket stream.");
 
