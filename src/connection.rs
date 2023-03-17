@@ -39,7 +39,6 @@ enum ConnectionMessage<
         data: OurReq,
         tx: oneshot::Sender<Result<TheirRep, RequestError>>,
     },
-    Reply(OurRep),
     Event(OurEvent),
     Send(internal::Message<OurReq, OurRep, OurEvent>),
     RequestListener(mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>),
@@ -137,9 +136,6 @@ impl<
             }
             ConnectionMessage::Request { data, tx } => {
                 self.send_request(data, tx).await;
-            }
-            ConnectionMessage::Reply(reply) => {
-                todo!()
             }
             ConnectionMessage::Close => {
                 return ControlFlow::Break(());
