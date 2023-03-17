@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::{Connection, ConnectionMessage};
 
@@ -36,7 +36,7 @@ impl<
         TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
     > ConnectionHdl<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
 {
-    pub async fn new(stream: WebSocketStream<TcpStream>) -> Self {
+    pub async fn new(stream: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         let (tx, rx) = mpsc::channel(1);
 
         let connection: Connection<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> =
