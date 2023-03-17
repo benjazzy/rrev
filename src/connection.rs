@@ -25,6 +25,7 @@ pub use connection_hdl::{ConnectionHdl, RequestError};
 use receiver::ReceiverHdl;
 pub use sender::SenderHdl;
 
+#[derive(Debug)]
 enum ConnectionMessage<
     OurReq: Serialize,
     OurRep: Serialize,
@@ -173,10 +174,11 @@ impl<
         ControlFlow::Continue(())
     }
 
-    async fn external_new_request_handler(
+    fn external_new_request_handler(
         &mut self,
         hdl: mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>,
     ) {
+        println!("new request handler");
         self.request_listeners.push(hdl);
     }
 
@@ -487,7 +489,13 @@ mod tests {
             id: 0,
             data: message.to_string(),
         });
-        let request_str = serde_json::to_string(&request).expect("Problem serializing event.");
+        let request_str = serde_json::to_string(&request).expect("Problem serializing request.");
+
+        let reply = internal::Message::<String, String, String>::Reply(internal::Reply {
+            id: 0,
+            data: message.to_string(),
+        });
+        let reply_str = serde_json::to_string(&reply).expect("Problem serializing reply.");
 
         let (our_client_tx, mut client_rx) = mpsc::channel(1);
         let (client_tx, mut our_client_rx) = mpsc::channel(1);
@@ -497,15 +505,27 @@ mod tests {
         let connection_hdl = server(socket).await;
 
         connection_hdl.register_request_listener(server_tx).await;
+
+        // Send our request to the server connection.
         our_client_tx
             .send(request_str)
             .await
             .expect("Problem sending request to client.");
 
-        let server_message = tokio::time::timeout(Duration::from_millis(1000000), server_rx.recv())
+        // Receive the request from the server connection.
+        let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
             .expect("Timeout getting message.")
-            .expect("Empty message");
+            .expect("Empty message.");
+
+        server_message.complete(message.to_string()).await;
+
+        let client_message = tokio::time::timeout(Duration::from_millis(100), our_client_rx.recv())
+            .await
+            .expect("Timeout getting message.")
+            .expect("Empty message.");
+
+        assert_eq!(reply_str, client_message);
     }
 
     #[tokio::test]

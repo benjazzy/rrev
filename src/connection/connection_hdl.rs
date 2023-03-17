@@ -79,7 +79,7 @@ impl<
         &self,
         tx: mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>,
     ) {
-        self.tx.send(ConnectionMessage::RequestListener(tx));
+        self.tx.send(ConnectionMessage::RequestListener(tx)).await;
     }
 
     pub async fn register_event_listener(&self, tx: mpsc::Sender<TheirEvent>) {
