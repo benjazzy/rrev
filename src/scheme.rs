@@ -1,12 +1,12 @@
-pub mod internal;
 mod event;
-mod request;
+pub mod internal;
 mod reply;
-mod requestable;
+mod request;
 mod request_handle;
+mod requestable;
 
 pub use event::Event;
-pub use request::Request;
 pub use reply::Reply;
-pub use requestable::Requestable;
+pub use request::Request;
 pub use request_handle::RequestHandle;
+pub use requestable::Requestable;

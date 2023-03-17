@@ -1,7 +1,7 @@
-use std::ops::ControlFlow;
-use futures_util::StreamExt;
 use futures_util::stream::SplitStream;
+use futures_util::StreamExt;
 use serde::Deserialize;
+use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -23,7 +23,7 @@ enum ReceiverMessage {
 struct Receiver<
     Req: for<'a> Deserialize<'a>,
     Rep: for<'a> Deserialize<'a>,
-    Event: for<'a> Deserialize<'a>
+    Event: for<'a> Deserialize<'a>,
 > {
     connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
     rx: mpsc::Receiver<ReceiverMessage>,
@@ -35,19 +35,23 @@ pub struct ReceiverHdl {
 }
 
 impl<
-    Req: for<'a> Deserialize<'a>,
-    Rep: for<'a> Deserialize<'a>,
-    Event: for<'a> Deserialize<'a>
-> Receiver<Req, Rep, Event> {
+        Req: for<'a> Deserialize<'a>,
+        Rep: for<'a> Deserialize<'a>,
+        Event: for<'a> Deserialize<'a>,
+    > Receiver<Req, Rep, Event>
+{
     pub fn new(
         connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
         rx: mpsc::Receiver<ReceiverMessage>,
-        ws_receiver: SplitStream<WebSocketStream<TcpStream>>
-    ) -> Self 
-    {
-        Receiver { connection_handle, rx, ws_receiver }
+        ws_receiver: SplitStream<WebSocketStream<TcpStream>>,
+    ) -> Self {
+        Receiver {
+            connection_handle,
+            rx,
+            ws_receiver,
+        }
     }
-    
+
     pub async fn run(mut self) {
         loop {
             tokio::select! {
@@ -75,8 +79,10 @@ impl<
         };
     }
 
-    async fn handle_ws_message(&self, try_message: Option<Result<Message, tungstenite::Error>>)
-        -> ControlFlow<()> {
+    async fn handle_ws_message(
+        &self,
+        try_message: Option<Result<Message, tungstenite::Error>>,
+    ) -> ControlFlow<()> {
         let message = if let Some(result) = try_message {
             match result {
                 Ok(m) => m,
@@ -87,11 +93,11 @@ impl<
                             debug!("Receiver connection closed.");
                             self.connection_handle.close().await;
                             return ControlFlow::Break(());
-                        },
+                        }
                         _ => {
                             error!("Receiver websocket error! {e}");
                             return ControlFlow::Continue(());
-                        },
+                        }
                     };
                 }
             }
@@ -122,10 +128,10 @@ impl ReceiverHdl {
     pub fn new<
         Req: for<'a> Deserialize<'a> + Send + 'static,
         Rep: for<'a> Deserialize<'a> + Send + 'static,
-        Event: for<'a> Deserialize<'a> + Send + 'static
-    > (
+        Event: for<'a> Deserialize<'a> + Send + 'static,
+    >(
         connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
-        ws_receiver: SplitStream<WebSocketStream<TcpStream>>
+        ws_receiver: SplitStream<WebSocketStream<TcpStream>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1);
         let receiver = Receiver::new(connection_handle, rx, ws_receiver);
@@ -142,52 +148,60 @@ impl ReceiverHdl {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use crate::connection::internal_hdl;
+    use crate::connection::internal_hdl::InternalMessage;
+    use crate::connection::receiver::ReceiverHdl;
+    use crate::scheme::internal;
     use futures_util::{SinkExt, StreamExt};
+    use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
-    use crate::scheme::internal;
-    use crate::connection::internal_hdl;
-    use crate::connection::internal_hdl::InternalMessage;
-    use crate::connection::receiver::ReceiverHdl;
 
     async fn client(addr: String, mut rx: mpsc::Receiver<Option<String>>) {
-        let url = url::Url::parse(format!("ws://{addr}").as_str())
-            .expect("Error parsing url.");
+        let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");
 
-        let (ws_stream, _) = connect_async(url).await
+        let (ws_stream, _) = connect_async(url)
+            .await
             .expect("Error connecting to the server.");
 
         let (mut write, _) = ws_stream.split();
 
         while let Some(Some(message)) = rx.recv().await {
-            write.send(Message::Text(message)).await.expect("Problem sending message.");
+            write
+                .send(Message::Text(message))
+                .await
+                .expect("Problem sending message.");
         }
     }
 
     async fn socket() -> (TcpListener, String) {
-        let socket = TcpListener::bind("127.0.0.1:0").await
+        let socket = TcpListener::bind("127.0.0.1:0")
+            .await
             .expect("Error binding on socket address");
-        let addr = socket.local_addr()
+        let addr = socket
+            .local_addr()
             .expect("Error getting socket listen address");
 
         (socket, addr.to_string())
     }
 
-    async fn server(socket: TcpListener) -> (ReceiverHdl, mpsc::Receiver<InternalMessage<String, String, String>>) {
-        let (internal_tx, internal_rx)
-            = mpsc::channel(1);
+    async fn server(
+        socket: TcpListener,
+    ) -> (
+        ReceiverHdl,
+        mpsc::Receiver<InternalMessage<String, String, String>>,
+    ) {
+        let (internal_tx, internal_rx) = mpsc::channel(1);
 
         let internal_hdl = internal_hdl::InternalHdl::new(internal_tx);
 
-        let (stream, _) = socket.accept().await
-            .expect("Error accepting connection.");
+        let (stream, _) = socket.accept().await.expect("Error accepting connection.");
 
-        let ws_stream =
-            tokio_tungstenite::accept_async(stream).await
-                .expect("Error accepting websocket stream.");
+        let ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("Error accepting websocket stream.");
 
         let (_, read) = ws_stream.split();
 
@@ -201,13 +215,16 @@ mod tests {
         client_tx: mpsc::Sender<Option<String>>,
         connection_rx: &mut mpsc::Receiver<InternalMessage<String, String, String>>,
     ) {
-        client_tx.send(Some(serde_json::to_string(&message).unwrap())).await
+        client_tx
+            .send(Some(serde_json::to_string(&message).unwrap()))
+            .await
             .expect("Problem sending message.");
 
-        let receiver_message = tokio::time::timeout(
-            Duration::from_millis(100), connection_rx.recv()).await
-            .expect("Timeout unwrapping receiver message.")
-            .expect("Problem unwrapping receiver message.");
+        let receiver_message =
+            tokio::time::timeout(Duration::from_millis(100), connection_rx.recv())
+                .await
+                .expect("Timeout unwrapping receiver message.")
+                .expect("Problem unwrapping receiver message.");
 
         assert_eq!(receiver_message, InternalMessage::NewMessage(message));
     }
@@ -215,8 +232,14 @@ mod tests {
     #[tokio::test]
     async fn check_receiver() {
         let message = "test";
-        let request = internal::Message::<String, String, String>::Request(internal::Request { id: 0, data: message.to_string() });
-        let reply = internal::Message::<String, String, String>::Reply(internal::Reply { id: 1, data: message.to_string() });
+        let request = internal::Message::<String, String, String>::Request(internal::Request {
+            id: 0,
+            data: message.to_string(),
+        });
+        let reply = internal::Message::<String, String, String>::Reply(internal::Reply {
+            id: 1,
+            data: message.to_string(),
+        });
         let event = internal::Message::<String, String, String>::Event(message.to_string());
         let (client_tx, mut client_rx) = mpsc::channel(1);
 

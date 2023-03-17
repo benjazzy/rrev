@@ -5,7 +5,7 @@ use crate::scheme::internal;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum InternalMessage<Req, Rep, Event> {
     Close,
-    NewMessage(internal::Message<Req, Rep, Event>)
+    NewMessage(internal::Message<Req, Rep, Event>),
 }
 
 #[derive(Clone)]
@@ -17,7 +17,7 @@ impl<Req, Rep, Event> InternalHdl<Req, Rep, Event> {
     pub fn new(tx: mpsc::Sender<InternalMessage<Req, Rep, Event>>) -> Self {
         InternalHdl { tx }
     }
-    
+
     pub async fn close(&self) {
         let _ = self.tx.send(InternalMessage::Close).await;
     }

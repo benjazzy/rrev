@@ -1,16 +1,16 @@
-use std::ops::ControlFlow;
-use futures_util::SinkExt;
+use crate::scheme::internal;
 use futures_util::stream::SplitSink;
+use futures_util::SinkExt;
 use serde::{Deserialize, Serialize};
+use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use tracing::error;
-use crate::scheme::internal;
 
-use crate::scheme::internal::Request;
 use super::internal_hdl;
+use crate::scheme::internal::Request;
 
 pub enum SenderMessage<Req, Rep, Event> {
     Message(internal::Message<Req, Rep, Event>),
@@ -27,7 +27,7 @@ struct Sender<
     OurEvent: Serialize,
     TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
     TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone
+    TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
 > {
     connection_hdl: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
     rx: mpsc::Receiver<SenderMessage<OurReq, OurRep, OurEvent>>,
@@ -40,20 +40,24 @@ pub struct SenderHdl<Req: Serialize, Rep: Serialize, Event: Serialize> {
 }
 
 impl<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone
-> Sender<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> {
+        OurReq: Serialize,
+        OurRep: Serialize,
+        OurEvent: Serialize,
+        TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
+        TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
+        TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
+    > Sender<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
+{
     pub fn new(
         connection_handle: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
         rx: mpsc::Receiver<SenderMessage<OurReq, OurRep, OurEvent>>,
-        ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>
-    ) -> Self
-    {
-        Sender { connection_hdl: connection_handle, rx, ws_sender }
+        ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
+    ) -> Self {
+        Sender {
+            connection_hdl: connection_handle,
+            rx,
+            ws_sender,
+        }
     }
 
     pub async fn run(mut self) {
@@ -61,12 +65,17 @@ impl<
             if let ControlFlow::Break(()) = self.handle_message(request).await {
                 break;
             };
-        };
+        }
     }
 
-    async fn handle_message(&mut self, message: SenderMessage<OurReq, OurRep, OurEvent>) -> ControlFlow<()> {
+    async fn handle_message(
+        &mut self,
+        message: SenderMessage<OurReq, OurRep, OurEvent>,
+    ) -> ControlFlow<()> {
         match message {
-            SenderMessage::Message(m) => { self.send(m).await; }
+            SenderMessage::Message(m) => {
+                self.send(m).await;
+            }
             SenderMessage::Close => {
                 let _ = self.ws_sender.close().await;
                 return ControlFlow::Break(());
@@ -92,19 +101,19 @@ impl<
 }
 
 impl<
-    OurReq: Serialize + Send + 'static,
-    OurRep: Serialize + Send + 'static,
-    OurEvent: Serialize + Send + 'static
-> SenderHdl<OurReq, OurRep, OurEvent> {
+        OurReq: Serialize + Send + 'static,
+        OurRep: Serialize + Send + 'static,
+        OurEvent: Serialize + Send + 'static,
+    > SenderHdl<OurReq, OurRep, OurEvent>
+{
     pub fn new<
         TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
         TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-        TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone
+        TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
     >(
         connection_handle: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
-        ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>
-    ) -> Self
-    {
+        ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(1);
         let sender = Sender::new(connection_handle, rx, ws_sender);
 
@@ -122,34 +131,32 @@ impl<
     }
 }
 
-impl<
-    Req: Serialize,
-    Rep: Serialize,
-    Event: Serialize
-> Clone for SenderHdl<Req, Rep, Event> {
+impl<Req: Serialize, Rep: Serialize, Event: Serialize> Clone for SenderHdl<Req, Rep, Event> {
     fn clone(&self) -> Self {
-        SenderHdl { tx: self.tx.clone() }
+        SenderHdl {
+            tx: self.tx.clone(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-    use futures_util::StreamExt;
-    use tokio::net::TcpListener;
-    use tokio::sync::mpsc;
-    use tokio_tungstenite::connect_async;
-    use crate::scheme::internal;
-    use crate::scheme::internal::Request;
     use crate::connection::internal_hdl;
     use crate::connection::internal_hdl::InternalHdl;
     use crate::connection::sender::SenderHdl;
+    use crate::scheme::internal;
+    use crate::scheme::internal::Request;
+    use futures_util::StreamExt;
+    use std::time::Duration;
+    use tokio::net::TcpListener;
+    use tokio::sync::mpsc;
+    use tokio_tungstenite::connect_async;
 
     async fn client(addr: String, tx: mpsc::Sender<String>) {
-        let url = url::Url::parse(format!("ws://{addr}").as_str())
-            .expect("Error parsing url.");
+        let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");
 
-        let (ws_stream, _) = connect_async(url).await
+        let (ws_stream, _) = connect_async(url)
+            .await
             .expect("Error connecting to the server.");
 
         let (_, mut read) = ws_stream.split();
@@ -157,32 +164,32 @@ mod tests {
             match message {
                 Ok(m) => {
                     tx.send(m.to_string()).await;
-                },
+                }
                 Err(_) => break,
             }
         }
     }
 
     async fn socket() -> (TcpListener, String) {
-        let socket = TcpListener::bind("127.0.0.1:0").await
+        let socket = TcpListener::bind("127.0.0.1:0")
+            .await
             .expect("Error binding on socket address");
-        let addr = socket.local_addr()
+        let addr = socket
+            .local_addr()
             .expect("Error getting socket listen address");
 
         (socket, addr.to_string())
     }
 
     async fn server(socket: TcpListener) -> SenderHdl<String, String, String> {
-        let (internal_tx, _internal_rx)
-            = mpsc::channel(1);
+        let (internal_tx, _internal_rx) = mpsc::channel(1);
 
         let internal_hdl: InternalHdl<(), (), ()> = internal_hdl::InternalHdl::new(internal_tx);
 
-        let (stream, _) = socket.accept().await
-            .expect("Error accepting connection.");
+        let (stream, _) = socket.accept().await.expect("Error accepting connection.");
 
-        let ws_stream =
-            tokio_tungstenite::accept_async(stream).await
+        let ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
             .expect("Error accepting websocket stream.");
 
         let (write, _) = ws_stream.split();
@@ -195,7 +202,10 @@ mod tests {
     #[tokio::test]
     async fn check_sender() {
         let message = "test";
-        let request = internal::Message::Request(Request{ id: 0, data: message.to_string() });
+        let request = internal::Message::Request(Request {
+            id: 0,
+            data: message.to_string(),
+        });
         let (client_tx, mut client_rx) = mpsc::channel(1);
 
         let (socket, addr) = socket().await;
@@ -204,11 +214,14 @@ mod tests {
 
         sender_hdl.send(request.clone()).await;
 
-        let client_message =
-            tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
-                .await.expect("Timeout getting message.")
-                .expect("Empty message");
+        let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
+            .await
+            .expect("Timeout getting message.")
+            .expect("Empty message");
 
-        assert_eq!(client_message.as_str(), serde_json::to_string(&request).unwrap());
+        assert_eq!(
+            client_message.as_str(),
+            serde_json::to_string(&request).unwrap()
+        );
     }
 }
