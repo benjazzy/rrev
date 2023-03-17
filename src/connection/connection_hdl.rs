@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::WebSocketStream;
+use crate::scheme::RequestHandle;
 
 use super::{ Connection, ConnectionMessage };
 
@@ -34,8 +35,7 @@ impl<
     TheirRep: for<'a> Deserialize<'a> + Send + Clone + 'static,
     TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
 > ConnectionHdl<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> {
-    pub async fn new<
-    >(stream: WebSocketStream<TcpStream>) -> Self {
+    pub async fn new(stream: WebSocketStream<TcpStream>) -> Self {
         let (tx, rx) = mpsc::channel(1);
 
         let connection: Connection<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
@@ -67,8 +67,8 @@ impl<
         let _ = self.tx.send(ConnectionMessage::Event(event)).await;
     }
 
-    pub async fn register_request_listener(&self, tx: mpsc::Sender<TheirReq>) {
-        todo!()
+    pub async fn register_request_listener(&self, tx: mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>) {
+        self.tx.send(ConnectionMessage::RequestListener(tx));
     }
 
     pub async fn register_event_listener(&self, tx: mpsc::Sender<TheirEvent>) {

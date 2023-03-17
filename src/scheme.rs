@@ -9,3 +9,4 @@ pub use event::Event;
 pub use request::Request;
 pub use reply::Reply;
 pub use requestable::Requestable;
+pub use request_handle::RequestHandle;

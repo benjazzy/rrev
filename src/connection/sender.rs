@@ -34,7 +34,7 @@ struct Sender<
     ws_sender: SplitSink<WebSocketStream<TcpStream>, Message>,
 }
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct SenderHdl<Req: Serialize, Rep: Serialize, Event: Serialize> {
     tx: mpsc::Sender<SenderMessage<Req, Rep, Event>>,
 }
@@ -119,6 +119,16 @@ impl<
 
     pub async fn send(&self, message: internal::Message<OurReq, OurRep, OurEvent>) {
         let _ = self.tx.send(SenderMessage::Message(message)).await;
+    }
+}
+
+impl<
+    Req: Serialize,
+    Rep: Serialize,
+    Event: Serialize
+> Clone for SenderHdl<Req, Rep, Event> {
+    fn clone(&self) -> Self {
+        SenderHdl { tx: self.tx.clone() }
     }
 }
 
