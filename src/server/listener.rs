@@ -24,8 +24,12 @@ impl Listener {
     pub async fn run(mut self) {
         loop {
             let control = tokio::select! {
-                Some(message) = self.rx.recv() => {
-                    self.handle_message(message).await
+                message_option = self.rx.recv() => {
+                    if let Some(message) = message_option {
+                        self.handle_message(message).await
+                    } else {
+                        ControlFlow::Break(())
+                    }
                 }
             };
 
@@ -52,7 +56,10 @@ impl Listener {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches::assert_matches;
     use std::net::SocketAddr;
+    use std::time::Duration;
+    use tokio::io;
     use crate::server::listener::ListenerHandle;
 
     #[tokio::test]
@@ -68,5 +75,18 @@ mod tests {
             .expect("Problem getting listen address.");
 
         assert_eq!(addr.ip().to_string(), address);
+    }
+
+    #[tokio::test]
+    async fn check_bad_addr() {
+        {
+            let bad_address = "1.1.1.1:0";
+            let result = ListenerHandle::new(bad_address.to_string()).await;
+            assert_matches!(result, Err(_));
+
+            let error = result.expect_err("Result is not an error.");
+            assert_matches!(error.kind(), io::ErrorKind::AddrNotAvailable);
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }

@@ -1,3 +1,5 @@
+#![feature(assert_matches)]
+
 mod client;
 mod connection;
 mod scheme;
