@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{MaybeTlsStream, tungstenite, WebSocketStream};
+use tokio_tungstenite::{tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
 
 use super::internal_hdl;
@@ -156,8 +156,8 @@ mod tests {
     use std::time::Duration;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
-    use tokio_tungstenite::{connect_async, MaybeTlsStream};
     use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::{connect_async, MaybeTlsStream};
 
     async fn client(addr: String, mut rx: mpsc::Receiver<Option<String>>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");

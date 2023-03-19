@@ -15,7 +15,7 @@ pub enum RequestError {
     Closed,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ConnectionHdl<
     OurReq: Serialize,
     OurRep: Serialize,
