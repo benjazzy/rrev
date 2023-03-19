@@ -7,9 +7,9 @@ pub async fn connect<
     OurReq: Serialize + Send + 'static,
     OurRep: Serialize + Send + 'static,
     OurEvent: Serialize + Send + 'static,
-    TheirReq: for<'a> Deserialize<'a>,
-    TheirRep: for<'a> Deserialize<'a>,
-    TheirEvent: for<'a> Deserialize<'a>,
+    TheirReq: for<'a> Deserialize<'a> + Send + Clone + 'static,
+    TheirRep: for<'a> Deserialize<'a> + Send + Clone + 'static,
+    TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
 >(
     url: Url,
 ) -> Result<
@@ -17,9 +17,9 @@ pub async fn connect<
     tungstenite::error::Error,
 > {
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
+    let connection_hdl = ConnectionHdl::new(ws_stream).await;
 
-    // let hdl = ConnectionHdl::new(ws_stream);
-    todo!()
+    Ok(connection_hdl)
 }
 
 #[cfg(test)]
@@ -76,11 +76,21 @@ mod tests {
         client_hdl.register_event_listener(event_tx.clone()).await;
         server_hdl.register_event_listener(event_tx.clone()).await;
 
-        client_hdl.event(event.to_string());
-        assert_eq!(event_rx.recv().await, Some(event.to_string()));
+        client_hdl.event(event.to_string()).await;
+        let recv_event = tokio::time::timeout(
+            Duration::from_millis(100),
+            event_rx.recv()
+        ).await.expect("Timeout getting event.");
+        println!("Event: {:#?}", recv_event);
+        assert_eq!(recv_event, Some(event.to_string()));
 
-        server_hdl.event(event.to_string());
-        assert_eq!(event_rx.recv().await, Some(event.to_string()));
+        server_hdl.event(event.to_string()).await;
+        let recv_event = tokio::time::timeout(
+            Duration::from_millis(100),
+            event_rx.recv()
+        ).await.expect("Timeout getting event.");
+        println!("Event: {:#?}", recv_event);
+        assert_eq!(recv_event, Some(event.to_string()));
     }
 
     #[derive(Debug, Clone)]
@@ -104,18 +114,16 @@ mod tests {
             .expect("Problem sending address to test.");
 
         loop {
-            // let control = tokio::select! {
-            //     Some(_) = rx.recv() => { ControlFlow::Break(()) }
-            // };
             let control = tokio::select! {
                 stream = socket.accept() => {
-                    let (stream, _) = stream.expect("Problem accepting connection");
+                    let (stream, addr) = stream.expect("Problem accepting connection");
+                    println!("Server accepting connection from {addr}");
                     let maybe_tls = MaybeTlsStream::Plain(stream);
                     let ws_stream = tokio_tungstenite::accept_async(maybe_tls).await
                         .expect("Problem upgrading stream to a websocket.");
 
                     let connection_hdl = ConnectionHdl::new(ws_stream).await;
-                    tx.send(ServerMessage::NewConnection(connection_hdl));
+                    tx.send(ServerMessage::NewConnection(connection_hdl)).await;
                     ControlFlow::Continue(())
                 },
                 _ = rx.recv() => { ControlFlow::Break(()) }
