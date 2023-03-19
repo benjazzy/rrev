@@ -1,0 +1,35 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          cargo --version
+          pwd
+          ls
+          ls src
+          cat /home/runner/work/websocket/websocket/Cargo.toml
+      - name: Build
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --verbose
+      - name: Run tests
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test --verbose
