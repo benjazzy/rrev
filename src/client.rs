@@ -77,18 +77,16 @@ mod tests {
         server_hdl.register_event_listener(event_tx.clone()).await;
 
         client_hdl.event(event.to_string()).await;
-        let recv_event = tokio::time::timeout(
-            Duration::from_millis(100),
-            event_rx.recv()
-        ).await.expect("Timeout getting event.");
+        let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
+            .await
+            .expect("Timeout getting event.");
         println!("Event: {:#?}", recv_event);
         assert_eq!(recv_event, Some(event.to_string()));
 
         server_hdl.event(event.to_string()).await;
-        let recv_event = tokio::time::timeout(
-            Duration::from_millis(100),
-            event_rx.recv()
-        ).await.expect("Timeout getting event.");
+        let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
+            .await
+            .expect("Timeout getting event.");
         println!("Event: {:#?}", recv_event);
         assert_eq!(recv_event, Some(event.to_string()));
     }
