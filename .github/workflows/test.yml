@@ -20,6 +20,8 @@ jobs:
         with:
           self-update: true
           toolchain: nightly
+      - name: Cd
+        run: cd ${{ github.workspace }}
       - name: Build
         run: cargo build --verbose
       - name: Run tests
