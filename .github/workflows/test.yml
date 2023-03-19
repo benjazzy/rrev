@@ -16,13 +16,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: brndnmtthws/rust-action-rustup@v1
-        with:
-          self-update: true
-          toolchain: nightly
-      - name: Cd
-        run: cd ${{ github.workspace }}
+      - name: Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          source "$HOME/.cargo/env"
+          cargo --version
       - name: Build
-        run: cargo build --verbose
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: |
+          source "$HOME/.cargo/env"
+          cargo test --verbose
