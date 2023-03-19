@@ -23,6 +23,7 @@ jobs:
           cargo --version
           pwd
           ls
+          ls src
           cat /home/runner/work/websocket/websocket/Cargo.toml
       - name: Build
         run: |
