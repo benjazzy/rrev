@@ -6,21 +6,34 @@ use tokio::{io, net};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-pub use listener_handle::ListenerHandle;
+pub use listener_handle::{ ListenerHandle, Error };
 use listener_handle::ListenerMessage;
 
+/// Listens for incoming connections.
 #[derive(Debug)]
 struct Listener {
+    /// Listens for messages from the handler.
     rx: mpsc::Receiver<ListenerMessage>,
+
+    // Tcp socket to listen for connections on.
     socket: net::TcpListener,
 }
 
 impl Listener {
+    /// Creates a new listener.
+    /// If an invalid listen address is passed in, return
+    /// the associated tokio:io error.
+    ///
+    /// # Arguments
+    /// * `rx` - Receiver to listen for ListenerMessages on.
+    /// * `addr` - Address to listen for connection on.
     pub async fn new(rx: mpsc::Receiver<ListenerMessage>, addr: String) -> io::Result<Self>  {
         let socket = net::TcpListener::bind(addr).await?;
         Ok(Listener { rx, socket })
     }
 
+    /// Starts listening for connections and ListenerMessages.
+    /// Will run until the handler closes or it receives a close ListenerMessage.
     pub async fn run(mut self) {
         loop {
             let control = tokio::select! {
@@ -39,6 +52,10 @@ impl Listener {
         }
     }
 
+    /// Gets called for every incoming ListenerMessage
+    ///
+    /// # Arguments
+    /// * `message` - Listener message that was received.
     async fn handle_message(&self, message: ListenerMessage) -> ControlFlow<()> {
         match message {
             ListenerMessage::Close => {
@@ -62,6 +79,7 @@ mod tests {
     use tokio::io;
     use crate::server::listener::ListenerHandle;
 
+    // Checks for ListenerHandle's ability to get the address from its running Listener.
     #[tokio::test]
     async fn check_get_addr() {
         let address = "127.0.0.1";
@@ -77,6 +95,7 @@ mod tests {
         assert_eq!(addr.ip().to_string(), address);
     }
 
+    // Checks that if we give Listener a bad address to listen on it will return an error.
     #[tokio::test]
     async fn check_bad_addr() {
         {
