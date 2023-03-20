@@ -2,6 +2,7 @@
 
 mod connection;
 mod scheme;
+mod sender_manager;
 pub mod client;
 pub mod server;
 

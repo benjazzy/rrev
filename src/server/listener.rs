@@ -3,17 +3,22 @@ mod listener_handle;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use tokio::{io, net};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 pub use listener_handle::{ ListenerHandle, Error };
 use listener_handle::ListenerMessage;
+use crate::sender_manager::SenderManager;
 
 /// Listens for incoming connections.
 #[derive(Debug)]
 struct Listener {
     /// Listens for messages from the handler.
     rx: mpsc::Receiver<ListenerMessage>,
+
+    /// List of senders to notify when we get a new tcp connection.
+    listeners: SenderManager<mpsc::Sender<TcpStream>>,
 
     // Tcp socket to listen for connections on.
     socket: net::TcpListener,
@@ -29,7 +34,11 @@ impl Listener {
     /// * `addr` - Address to listen for connection on.
     pub async fn new(rx: mpsc::Receiver<ListenerMessage>, addr: String) -> io::Result<Self>  {
         let socket = net::TcpListener::bind(addr).await?;
-        Ok(Listener { rx, socket })
+        Ok(Listener {
+            rx,
+            listeners: SenderManager::new(),
+            socket
+        })
     }
 
     /// Starts listening for connections and ListenerMessages.
@@ -50,6 +59,10 @@ impl Listener {
                 break;
             }
         }
+    }
+
+    pub fn register_connection_listener(&mut self, tx: mpsc::Sender<TcpStream>) -> usize {
+        self.listeners.add(tx)
     }
 
     /// Gets called for every incoming ListenerMessage
