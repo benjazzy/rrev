@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use tokio::io;
-use tokio::sync::{mpsc, oneshot };
+use tokio::net::TcpStream;
+use tokio::sync::{mpsc, oneshot};
 
 use super::Listener;
 
@@ -38,8 +39,9 @@ pub enum Error {
 /// # tokio_test::block_on(async {
 /// use websocket::server::ListenerHandle;
 ///
+/// let (tx, _rx) = tokio::sync::mpsc::channel(1);
 /// let ip = "127.0.0.1";
-/// let handle = ListenerHandle::new(format!("{ip}:0").to_string()).await
+/// let handle = ListenerHandle::new(tx, format!("{ip}:0").to_string()).await
 ///     .expect("Problem binding to address");
 ///
 /// let address = handle.get_addr().await.expect("Problem getting address.");
@@ -59,13 +61,17 @@ impl ListenerHandle {
     ///
     /// # Arguments
     /// * `addr` - Ip and Port to listen on.
-    pub async fn new(addr: String) -> io::Result<Self> {
+    pub async fn new(stream_tx: mpsc::Sender<TcpStream>, addr: String) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel(1);
 
-        let listener = Listener::new(rx, addr).await?;
+        let listener = Listener::new(rx, stream_tx, addr).await?;
         tokio::spawn(listener.run());
 
         Ok(ListenerHandle { tx })
+    }
+
+    pub async fn close(&self) {
+        self.tx.send(ListenerMessage::Close).await;
     }
 
     /// Gets the address of the running Listener.
@@ -77,7 +83,10 @@ impl ListenerHandle {
     /// address then return [Error::Io] with the io error attached.
     pub async fn get_addr(&self) -> Result<SocketAddr, Error> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(ListenerMessage::GetAddress(tx)).await.map_err(|_| Error::SendError)?;
+        self.tx
+            .send(ListenerMessage::GetAddress(tx))
+            .await
+            .map_err(|_| Error::SendError)?;
         let addr = rx.await.map_err(|_| Error::RecvError)?;
 
         return addr.map_err(|e| Error::Io(e));

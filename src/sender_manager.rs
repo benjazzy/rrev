@@ -12,7 +12,10 @@ pub struct SenderManager<T> {
 
 impl<T> SenderManager<T> {
     pub fn new() -> Self {
-        SenderManager { senders: vec![], next: 0 }
+        SenderManager {
+            senders: vec![],
+            next: 0,
+        }
     }
 
     pub fn add(&mut self, item: T) -> usize {
@@ -44,9 +47,8 @@ impl<T> SenderManager<T> {
     }
 
     fn update_next(&mut self) {
-        while
-            !matches!(self.senders.get(self.next), None) &&
-            !matches!(self.senders.get(self.next), Some(Item::Empty))
+        while !matches!(self.senders.get(self.next), None)
+            && !matches!(self.senders.get(self.next), Some(Item::Empty))
         {
             self.next += 1;
         }
@@ -71,7 +73,10 @@ impl<T> From<Item<T>> for Option<T> {
     }
 }
 
-impl<T> PartialEq for Item<T> where T: PartialEq {
+impl<T> PartialEq for Item<T>
+where
+    T: PartialEq,
+{
     fn eq(&self, other: &Self) -> bool {
         match self {
             Item::Sender(s) => {
@@ -129,7 +134,6 @@ mod tests {
         assert_eq!(removed2, Some(num2));
         assert_eq!(manager.get_senders().len(), 2);
         assert_eq!(manager.get_senders().get(idx2), Some(&Item::Empty));
-
     }
 
     #[test]

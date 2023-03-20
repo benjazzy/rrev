@@ -1,9 +1,9 @@
 #![feature(assert_matches)]
 
+pub mod client;
 mod connection;
 mod scheme;
 mod sender_manager;
-pub mod client;
 pub mod server;
 
 pub use scheme::Requestable;
