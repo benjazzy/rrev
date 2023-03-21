@@ -1,9 +1,11 @@
+use crate::server::acceptor::ListenersAcceptorHandle;
 use std::net::SocketAddr;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 use super::Listener;
+use crate::server::Error;
 
 /// Messages that can be sent from a ListenerHandle to a Listener.
 /// If the message requires a reply then use a oneshot.
@@ -16,39 +18,25 @@ pub enum ListenerMessage {
     GetAddress(oneshot::Sender<io::Result<SocketAddr>>),
 }
 
-/// Types of errors that ListenerHandle can respond with.
-#[derive(Debug)]
-pub enum Error {
-    /// Used when getting the listen address of the Listener socket if
-    /// the socket is not listening.
-    Io(io::Error),
-
-    /// Problem receiving the reply from Listener.
-    RecvError,
-
-    /// Problem sending message to the Listener.
-    SendError,
-}
-
 /// Used to access a Listener.
 /// Listener listens for incoming tcp connections.
 ///
 /// # Examples
 ///
-/// ```
-/// # tokio_test::block_on(async {
-/// use websocket::server::ListenerHandle;
-///
-/// let (tx, _rx) = tokio::sync::mpsc::channel(1);
-/// let ip = "127.0.0.1";
-/// let handle = ListenerHandle::new(tx, format!("{ip}:0").to_string()).await
-///     .expect("Problem binding to address");
-///
-/// let address = handle.get_addr().await.expect("Problem getting address.");
-/// assert_eq!(address.ip().to_string(), ip.to_string());
-///
-/// # })
-/// ```
+// ```
+// # tokio_test::block_on(async {
+// use websocket::server::ListenerHandle;
+//
+// let (tx, _rx) = tokio::sync::mpsc::channel(1);
+// let ip = "127.0.0.1";
+// let handle = ListenerHandle::new(tx, format!("{ip}:0").to_string()).await
+//     .expect("Problem binding to address");
+//
+// let address = handle.get_addr().await.expect("Problem getting address.");
+// assert_eq!(address.ip().to_string(), ip.to_string());
+//
+// # })
+// ```
 #[derive(Debug, Clone)]
 pub struct ListenerHandle {
     tx: mpsc::Sender<ListenerMessage>,
@@ -61,10 +49,10 @@ impl ListenerHandle {
     ///
     /// # Arguments
     /// * `addr` - Ip and Port to listen on.
-    pub async fn new(stream_tx: mpsc::Sender<TcpStream>, addr: String) -> io::Result<Self> {
+    pub async fn new(acceptor_hdl: ListenersAcceptorHandle, addr: String) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel(1);
 
-        let listener = Listener::new(rx, stream_tx, addr).await?;
+        let listener = Listener::new(rx, acceptor_hdl, addr).await?;
         tokio::spawn(listener.run());
 
         Ok(ListenerHandle { tx })

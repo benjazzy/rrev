@@ -8,8 +8,10 @@ use tokio::{io, net};
 use tracing::{debug, error, warn};
 
 use crate::sender_manager::SenderManager;
+use crate::server::acceptor::ListenersAcceptorHandle;
+use crate::server::Error;
+pub use listener_handle::ListenerHandle;
 use listener_handle::ListenerMessage;
-pub use listener_handle::{Error, ListenerHandle};
 
 /// Listens for incoming connections.
 #[derive(Debug)]
@@ -17,8 +19,7 @@ struct Listener {
     /// Listens for messages from the handler.
     rx: mpsc::Receiver<ListenerMessage>,
 
-    /// Send new tcp connections over this Sender.
-    tx: mpsc::Sender<TcpStream>,
+    acceptor_hdl: ListenersAcceptorHandle,
 
     // Tcp socket to listen for connections on.
     socket: net::TcpListener,
@@ -35,11 +36,15 @@ impl Listener {
     /// * `addr` - Address to listen for connection on.
     pub async fn new(
         rx: mpsc::Receiver<ListenerMessage>,
-        tx: mpsc::Sender<TcpStream>,
+        acceptor_hdl: ListenersAcceptorHandle,
         addr: String,
     ) -> io::Result<Self> {
         let socket = net::TcpListener::bind(addr).await?;
-        Ok(Listener { rx, tx, socket })
+        Ok(Listener {
+            rx,
+            acceptor_hdl,
+            socket,
+        })
     }
 
     /// Starts listening for connections and ListenerMessages.
@@ -60,7 +65,7 @@ impl Listener {
                     match stream_result {
                         Ok((stream, addr)) => {
                             debug!("New tcp connection from {addr}");
-                            self.handle_new_stream(stream).await
+                            self.handle_new_stream(stream, addr).await
                         },
                         Err(e) => {
                             warn!("Problem accepting new tcp connection. {e}");
@@ -95,11 +100,8 @@ impl Listener {
         ControlFlow::Continue(())
     }
 
-    async fn handle_new_stream(&self, stream: TcpStream) -> ControlFlow<()> {
-        if let Err(e) = self.tx.send(stream).await {
-            error!("Problem sending new stream. {e}");
-            return ControlFlow::Break(());
-        }
+    async fn handle_new_stream(&self, stream: TcpStream, addr: SocketAddr) -> ControlFlow<()> {
+        self.acceptor_hdl.new_stream(stream, addr).await;
 
         ControlFlow::Continue(())
     }
@@ -107,6 +109,7 @@ impl Listener {
 
 #[cfg(test)]
 mod tests {
+    use crate::server::acceptor::{AcceptorHandle, AcceptorMessage};
     use crate::server::listener::ListenerHandle;
     use std::assert_matches::assert_matches;
     use std::net::SocketAddr;
@@ -121,11 +124,12 @@ mod tests {
     #[tokio::test]
     async fn check_get_addr() {
         let (tx, _rx) = mpsc::channel(1);
+        let acceptor_hdl = AcceptorHandle::from_tx(tx);
 
         let address = "127.0.0.1";
         let port = 0;
 
-        let listener_handle = ListenerHandle::new(tx, format!("{address}:{port}"))
+        let listener_handle = ListenerHandle::new(acceptor_hdl.into(), format!("{address}:{port}"))
             .await
             .expect("Problem creating listener");
 
@@ -140,27 +144,26 @@ mod tests {
     // Checks that if we give Listener a bad address to listen on it will return an error.
     #[tokio::test]
     async fn check_bad_addr() {
-        {
-            let (tx, _rx) = mpsc::channel(1);
+        let (tx, _rx) = mpsc::channel(1);
+        let acceptor_hdl = AcceptorHandle::from_tx(tx);
 
-            let bad_address = "1.1.1.1:0";
-            let result = ListenerHandle::new(tx, bad_address.to_string()).await;
-            assert_matches!(result, Err(_));
+        let bad_address = "1.1.1.1:0";
+        let result = ListenerHandle::new(acceptor_hdl.into(), bad_address.to_string()).await;
+        assert_matches!(result, Err(_));
 
-            let error = result.expect_err("Result is not an error.");
-            assert_matches!(error.kind(), io::ErrorKind::AddrNotAvailable);
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let error = result.expect_err("Result is not an error.");
+        assert_matches!(error.kind(), io::ErrorKind::AddrNotAvailable);
     }
 
     #[tokio::test]
     async fn check_connect() {
         let message = "test message";
         let (tx, mut rx) = mpsc::channel(1);
+        let acceptor_hdl = AcceptorHandle::from_tx(tx);
         let address = "127.0.0.1";
         let port = 0;
 
-        let listener_handle = ListenerHandle::new(tx, format!("{address}:{port}"))
+        let listener_handle = ListenerHandle::new(acceptor_hdl.into(), format!("{address}:{port}"))
             .await
             .expect("Problem creating listener");
 
@@ -174,10 +177,14 @@ mod tests {
             .await
             .expect("Problem connecting to listener.");
 
-        let mut server_stream = tokio::time::timeout(Duration::from_millis(100), rx.recv())
+        let mut server_stream = match tokio::time::timeout(Duration::from_millis(100), rx.recv())
             .await
             .expect("Timeout getting server_stream.")
-            .expect("Problem getting server_stream.");
+            .expect("Problem getting server_stream.")
+        {
+            AcceptorMessage::NewStream(stream, _) => stream,
+            _ => panic!("Didn't get NewStream message."),
+        };
 
         let mut buf: [u8; 12] = [0; 12];
         client_stream
