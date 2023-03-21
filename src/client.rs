@@ -2,18 +2,12 @@ use crate::connection::ConnectionHdl;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite;
 use url::Url;
+use crate::parser::Parser;
 
-pub async fn connect<
-    OurReq: Serialize + Send + 'static,
-    OurRep: Serialize + Send + 'static,
-    OurEvent: Serialize + Send + 'static,
-    TheirReq: for<'a> Deserialize<'a> + Send + Clone + 'static,
-    TheirRep: for<'a> Deserialize<'a> + Send + Clone + 'static,
-    TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
->(
+pub async fn connect<P: Parser>(
     url: Url,
 ) -> Result<
-    ConnectionHdl<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
+    ConnectionHdl<P>,
     tungstenite::error::Error,
 > {
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
@@ -32,8 +26,9 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
     use url::Url;
+    use crate::parser::StringParser;
 
-    type ConnectionHdl = connection::ConnectionHdl<String, String, String, String, String, String>;
+    type ConnectionHdl = connection::ConnectionHdl<StringParser>;
 
     #[tokio::test]
     async fn check_connect() {
@@ -55,7 +50,7 @@ mod tests {
         };
         let url = format!("ws://{addr}");
 
-        let client_hdl = connect::<String, String, String, String, String, String>(
+        let client_hdl = connect::<StringParser>(
             Url::parse(url.as_str()).expect("Problem parsing url"),
         )
         .await

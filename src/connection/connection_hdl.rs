@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use crate::parser::Parser;
 
 use super::{Connection, ConnectionMessage};
 
@@ -16,30 +17,16 @@ pub enum RequestError {
 }
 
 #[derive(Debug, Clone)]
-pub struct ConnectionHdl<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq: for<'a> Deserialize<'a>,
-    TheirRep: for<'a> Deserialize<'a>,
-    TheirEvent: for<'a> Deserialize<'a>,
-> {
-    tx: mpsc::Sender<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>>,
+pub struct ConnectionHdl<P: Parser> {
+    tx: mpsc::Sender<ConnectionMessage<P>>,
 }
 
-impl<
-        OurReq: Serialize + Send + 'static,
-        OurRep: Serialize + Send + 'static,
-        OurEvent: Serialize + Send + 'static,
-        TheirReq: for<'a> Deserialize<'a> + Send + Clone + 'static,
-        TheirRep: for<'a> Deserialize<'a> + Send + Clone + 'static,
-        TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
-    > ConnectionHdl<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
+impl<P: Parser> ConnectionHdl<P>
 {
     pub async fn new(stream: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         let (tx, rx) = mpsc::channel(1);
 
-        let connection: Connection<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent> =
+        let connection: Connection<P> =
             Connection::new(rx, stream);
 
         tokio::spawn(connection.run());
@@ -47,7 +34,7 @@ impl<
         ConnectionHdl { tx }
     }
 
-    pub async fn request(&self, request: OurReq) -> Result<TheirRep, RequestError> {
+    pub async fn request(&self, request: P::OurRequest) -> Result<P::TheirReply, RequestError> {
         let (tx, rx) = oneshot::channel();
         let _ = self
             .tx
@@ -62,27 +49,27 @@ impl<
 
     pub async fn request_timeout(
         &self,
-        request: OurReq,
+        request: P::OurRequest,
         timeout: Duration,
-    ) -> Result<TheirRep, RequestError> {
+    ) -> Result<P::TheirReply, RequestError> {
         match tokio::time::timeout(timeout, self.request(request)).await {
             Ok(result) => result,
             Err(_) => return Err(RequestError::Timeout),
         }
     }
 
-    pub async fn event(&self, event: OurEvent) {
+    pub async fn event(&self, event: P::OurEvent) {
         let _ = self.tx.send(ConnectionMessage::Event(event)).await;
     }
 
     pub async fn register_request_listener(
         &self,
-        tx: mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>,
+        tx: mpsc::Sender<RequestHandle<P>>,
     ) {
         self.tx.send(ConnectionMessage::RequestListener(tx)).await;
     }
 
-    pub async fn register_event_listener(&self, tx: mpsc::Sender<TheirEvent>) {
+    pub async fn register_event_listener(&self, tx: mpsc::Sender<P::TheirEvent>) {
         let _ = self.tx.send(ConnectionMessage::EventListener(tx)).await;
     }
 }

@@ -1,20 +1,21 @@
 use tokio::sync::mpsc;
+use crate::parser::Parser;
 
 use crate::scheme::internal;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum InternalMessage<Req, Rep, Event> {
+pub enum InternalMessage<P: Parser> {
     Close,
-    NewMessage(internal::Message<Req, Rep, Event>),
+    NewMessage(internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>),
 }
 
 #[derive(Clone)]
-pub struct InternalHdl<Req, Rep, Event> {
-    tx: mpsc::Sender<InternalMessage<Req, Rep, Event>>,
+pub struct InternalHdl<P: Parser> {
+    tx: mpsc::Sender<InternalMessage<P>>,
 }
 
-impl<Req, Rep, Event> InternalHdl<Req, Rep, Event> {
-    pub fn new(tx: mpsc::Sender<InternalMessage<Req, Rep, Event>>) -> Self {
+impl<P: Parser> InternalHdl<P> {
+    pub fn new(tx: mpsc::Sender<InternalMessage<P>>) -> Self {
         InternalHdl { tx }
     }
 
@@ -22,7 +23,7 @@ impl<Req, Rep, Event> InternalHdl<Req, Rep, Event> {
         let _ = self.tx.send(InternalMessage::Close).await;
     }
 
-    pub async fn new_message(&self, message: internal::Message<Req, Rep, Event>) {
+    pub async fn new_message(&self, message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>) {
         let _ = self.tx.send(InternalMessage::NewMessage(message)).await;
     }
 }

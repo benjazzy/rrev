@@ -24,65 +24,44 @@ use crate::scheme::RequestHandle;
 pub use connection_hdl::{ConnectionHdl, RequestError};
 use receiver::ReceiverHdl;
 pub use sender::SenderHdl;
+use crate::parser::Parser;
 
 #[derive(Debug)]
-enum ConnectionMessage<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq,
-    TheirRep,
-    TheirEvent,
-> {
+enum ConnectionMessage<P: Parser>{
     Close,
     Request {
-        data: OurReq,
-        tx: oneshot::Sender<Result<TheirRep, RequestError>>,
+        data: P::OurRequest,
+        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     },
-    Event(OurEvent),
-    Send(internal::Message<OurReq, OurRep, OurEvent>),
-    RequestListener(mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>),
-    EventListener(mpsc::Sender<TheirEvent>),
+    Event(P::OurEvent),
+    Send(internal::Message<P::OurRequest, P::OurReply, P::OurEvent>),
+    RequestListener(mpsc::Sender<RequestHandle<P>>),
+    EventListener(mpsc::Sender<P::TheirEvent>),
 }
 
-struct Connection<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq: for<'a> Deserialize<'a>,
-    TheirRep: for<'a> Deserialize<'a>,
-    TheirEvent: for<'a> Deserialize<'a>,
-> {
+struct Connection<P: Parser> {
     next_id: usize,
 
     receiver_hdl: ReceiverHdl,
-    sender_hdl: SenderHdl<OurReq, OurRep, OurEvent>,
+    sender_hdl: SenderHdl<P>,
 
-    internal_rx: mpsc::Receiver<InternalMessage<TheirReq, TheirRep, TheirEvent>>,
-    rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>>,
+    internal_rx: mpsc::Receiver<InternalMessage<P>>,
+    rx: mpsc::Receiver<ConnectionMessage<P>>,
 
-    reply_map: HashMap<usize, oneshot::Sender<Result<TheirRep, RequestError>>>,
-    request_listeners: Vec<mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>>,
-    event_listeners: Vec<mpsc::Sender<TheirEvent>>,
+    reply_map: HashMap<usize, oneshot::Sender<Result<P::TheirReply, RequestError>>>,
+    request_listeners: Vec<mpsc::Sender<RequestHandle<P>>>,
+    event_listeners: Vec<mpsc::Sender<P::TheirEvent>>,
 }
 
-impl<
-        OurReq: Serialize + Send + 'static,
-        OurRep: Serialize + Send + 'static,
-        OurEvent: Serialize + Send + 'static,
-        TheirReq: for<'a> Deserialize<'a> + Clone + Send + 'static,
-        TheirRep: for<'a> Deserialize<'a> + Clone + Send + 'static,
-        TheirEvent: for<'a> Deserialize<'a> + Clone + Send + 'static,
-    > Connection<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
-{
+impl<P: Parser> Connection<P> {
     pub fn new(
         rx: mpsc::Receiver<
-            ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
+            ConnectionMessage<P>,
         >,
         stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Self {
         let (internal_tx, internal_rx) = mpsc::channel(1);
-        let internal_hdl: InternalHdl<TheirReq, TheirRep, TheirEvent> =
+        let internal_hdl: InternalHdl<P> =
             InternalHdl::new(internal_tx);
         let (sender, receiver) = stream.split();
 
@@ -128,7 +107,7 @@ impl<
 
     async fn handle_external(
         &mut self,
-        message: ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
+        message: ConnectionMessage<P>,
     ) -> ControlFlow<()> {
         match message {
             ConnectionMessage::Event(event) => {
@@ -156,7 +135,7 @@ impl<
 
     async fn handle_internal(
         &mut self,
-        message: InternalMessage<TheirReq, TheirRep, TheirEvent>,
+        message: InternalMessage<P>,
     ) -> ControlFlow<()> {
         match message {
             InternalMessage::Close => {
@@ -172,7 +151,7 @@ impl<
 
     fn external_new_request_handler(
         &mut self,
-        hdl: mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>,
+        hdl: mpsc::Sender<RequestHandle<P>>,
     ) {
         println!("new request handler");
         self.request_listeners.push(hdl);
@@ -180,7 +159,7 @@ impl<
 
     async fn handle_internal_new_message(
         &mut self,
-        message: internal::Message<TheirReq, TheirRep, TheirEvent>,
+        message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>,
     ) {
         match message {
             internal::Message::Request(request) => self.handle_internal_request(request).await,
@@ -191,7 +170,7 @@ impl<
         }
     }
 
-    async fn handle_internal_request(&mut self, request: internal::Request<TheirReq>) {
+    async fn handle_internal_request(&mut self, request: internal::Request<P::TheirRequest>) {
         for request_listener in self.request_listeners.iter() {
             let handle = RequestHandle::new(request.clone(), self.sender_hdl.clone());
 
@@ -199,7 +178,7 @@ impl<
         }
     }
 
-    async fn handle_internal_reply(&mut self, reply: internal::Reply<TheirRep>) {
+    async fn handle_internal_reply(&mut self, reply: internal::Reply<P::TheirReply>) {
         if let Some(tx) = self.reply_map.remove(&reply.id) {
             if let Err(_) = tx.send(Ok(reply.data)) {
                 warn!("Problem sending reply back to requester");
@@ -209,7 +188,7 @@ impl<
         };
     }
 
-    async fn handle_internal_event(&self, event: TheirEvent) {
+    async fn handle_internal_event(&self, event: P::TheirEvent) {
         for tx in self.event_listeners.iter() {
             let event = event.clone();
             let _ = tx.send(event).await;
@@ -218,8 +197,8 @@ impl<
 
     async fn send_request(
         &mut self,
-        data: OurReq,
-        tx: oneshot::Sender<Result<TheirRep, RequestError>>,
+        data: P::OurRequest,
+        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     ) {
         let id = self.next_id;
         self.next_id += 1;
@@ -229,7 +208,7 @@ impl<
         }
         self.reply_map.insert(id, tx);
 
-        let request = internal::Message::Request(internal::Request::<OurReq> { id, data });
+        let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data });
         self.sender_hdl.send(request).await;
     }
 
@@ -262,8 +241,9 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
     use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
+    use crate::parser::StringParser;
 
-    type ConHdlType = ConnectionHdl<String, String, String, String, String, String>;
+    type ConHdlType = ConnectionHdl<StringParser>;
 
     async fn client(addr: String) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
         let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");

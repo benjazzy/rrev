@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
+use crate::parser::Parser;
 
 use super::internal_hdl;
 
@@ -20,12 +21,8 @@ enum ReceiverMessage {
 /// If the websocket message is a close message or unhandleable error Receiver
 /// calls close on Connection's internal handle to close the connection.
 /// Receiver also waits for a message from Connection and handles the message.
-struct Receiver<
-    Req: for<'a> Deserialize<'a>,
-    Rep: for<'a> Deserialize<'a>,
-    Event: for<'a> Deserialize<'a>,
-> {
-    connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
+struct Receiver<P: Parser> {
+    connection_handle: internal_hdl::InternalHdl<P>,
     rx: mpsc::Receiver<ReceiverMessage>,
     ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
 }
@@ -34,14 +31,10 @@ pub struct ReceiverHdl {
     tx: mpsc::Sender<ReceiverMessage>,
 }
 
-impl<
-        Req: for<'a> Deserialize<'a>,
-        Rep: for<'a> Deserialize<'a>,
-        Event: for<'a> Deserialize<'a>,
-    > Receiver<Req, Rep, Event>
+impl<P: Parser> Receiver<P>
 {
     pub fn new(
-        connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
+        connection_handle: internal_hdl::InternalHdl<P>,
         rx: mpsc::Receiver<ReceiverMessage>,
         ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     ) -> Self {
@@ -125,12 +118,8 @@ impl<
 }
 
 impl ReceiverHdl {
-    pub fn new<
-        Req: for<'a> Deserialize<'a> + Send + 'static,
-        Rep: for<'a> Deserialize<'a> + Send + 'static,
-        Event: for<'a> Deserialize<'a> + Send + 'static,
-    >(
-        connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
+    pub fn new<P: Parser>(
+        connection_handle: internal_hdl::InternalHdl<P>,
         ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1);
@@ -158,6 +147,7 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::{connect_async, MaybeTlsStream};
+    use crate::parser::StringParser;
 
     async fn client(addr: String, mut rx: mpsc::Receiver<Option<String>>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");
@@ -191,7 +181,7 @@ mod tests {
         socket: TcpListener,
     ) -> (
         ReceiverHdl,
-        mpsc::Receiver<InternalMessage<String, String, String>>,
+        mpsc::Receiver<InternalMessage<StringParser>>,
     ) {
         let (internal_tx, internal_rx) = mpsc::channel(1);
 
@@ -215,7 +205,7 @@ mod tests {
     async fn try_message(
         message: internal::Message<String, String, String>,
         client_tx: mpsc::Sender<Option<String>>,
-        connection_rx: &mut mpsc::Receiver<InternalMessage<String, String, String>>,
+        connection_rx: &mut mpsc::Receiver<InternalMessage<StringParser>>,
     ) {
         client_tx
             .send(Some(serde_json::to_string(&message).unwrap()))

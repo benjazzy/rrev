@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// # Examples
 /// See [StringParser]
-pub trait Parser {
+pub trait Parser: Clone + 'static {
     type OurRequest: Serialize + Send + 'static;
     type OurReply: Serialize + Send + 'static;
     type OurEvent: Serialize + Send + 'static;
@@ -38,6 +38,7 @@ pub trait Parser {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StringParser;
 
 impl Parser for StringParser {
