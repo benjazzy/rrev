@@ -1,3 +1,4 @@
+use crate::parser::Parser;
 use crate::scheme::RequestHandle;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -5,7 +6,6 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use crate::parser::Parser;
 
 use super::{Connection, ConnectionMessage};
 
@@ -21,13 +21,11 @@ pub struct ConnectionHdl<P: Parser> {
     tx: mpsc::Sender<ConnectionMessage<P>>,
 }
 
-impl<P: Parser> ConnectionHdl<P>
-{
+impl<P: Parser> ConnectionHdl<P> {
     pub async fn new(stream: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         let (tx, rx) = mpsc::channel(1);
 
-        let connection: Connection<P> =
-            Connection::new(rx, stream);
+        let connection: Connection<P> = Connection::new(rx, stream);
 
         tokio::spawn(connection.run());
 
@@ -62,10 +60,7 @@ impl<P: Parser> ConnectionHdl<P>
         let _ = self.tx.send(ConnectionMessage::Event(event)).await;
     }
 
-    pub async fn register_request_listener(
-        &self,
-        tx: mpsc::Sender<RequestHandle<P>>,
-    ) {
+    pub async fn register_request_listener(&self, tx: mpsc::Sender<RequestHandle<P>>) {
         self.tx.send(ConnectionMessage::RequestListener(tx)).await;
     }
 

@@ -1,5 +1,5 @@
-use tokio::sync::mpsc;
 use crate::parser::Parser;
+use tokio::sync::mpsc;
 
 use crate::scheme::internal;
 
@@ -23,7 +23,10 @@ impl<P: Parser> InternalHdl<P> {
         let _ = self.tx.send(InternalMessage::Close).await;
     }
 
-    pub async fn new_message(&self, message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>) {
+    pub async fn new_message(
+        &self,
+        message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>,
+    ) {
         let _ = self.tx.send(InternalMessage::NewMessage(message)).await;
     }
 }

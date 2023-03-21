@@ -12,12 +12,8 @@ pub struct RequestHandle<P: Parser> {
     sender_hdl: SenderHdl<P>,
 }
 
-impl<'a, P: Parser> RequestHandle<P>
-{
-    pub fn new(
-        request: internal::Request<P::TheirRequest>,
-        sender_hdl: SenderHdl<P>,
-    ) -> Self {
+impl<'a, P: Parser> RequestHandle<P> {
+    pub fn new(request: internal::Request<P::TheirRequest>, sender_hdl: SenderHdl<P>) -> Self {
         RequestHandle {
             request,
             sender_hdl,

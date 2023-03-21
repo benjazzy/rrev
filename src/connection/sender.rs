@@ -1,3 +1,4 @@
+use crate::parser::Parser;
 use crate::scheme::internal;
 use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
@@ -8,7 +9,6 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::error;
-use crate::parser::Parser;
 
 use super::internal_hdl;
 use crate::scheme::internal::Request;
@@ -33,8 +33,7 @@ pub struct SenderHdl<P: Parser> {
     tx: mpsc::Sender<SenderMessage<P>>,
 }
 
-impl<P: Parser> Sender<P>
-{
+impl<P: Parser> Sender<P> {
     pub fn new(
         connection_handle: internal_hdl::InternalHdl<P>,
         rx: mpsc::Receiver<SenderMessage<P>>,
@@ -55,10 +54,7 @@ impl<P: Parser> Sender<P>
         }
     }
 
-    async fn handle_message(
-        &mut self,
-        message: SenderMessage<P>,
-    ) -> ControlFlow<()> {
+    async fn handle_message(&mut self, message: SenderMessage<P>) -> ControlFlow<()> {
         match message {
             SenderMessage::Message(m) => {
                 self.send(m).await;
@@ -122,6 +118,7 @@ mod tests {
     use crate::connection::internal_hdl;
     use crate::connection::internal_hdl::InternalHdl;
     use crate::connection::sender::SenderHdl;
+    use crate::parser::StringParser;
     use crate::scheme::internal;
     use crate::scheme::internal::Request;
     use futures_util::StreamExt;
@@ -129,7 +126,6 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_tungstenite::{connect_async, MaybeTlsStream};
-    use crate::parser::StringParser;
 
     async fn client(addr: String, tx: mpsc::Sender<String>) {
         let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");

@@ -20,14 +20,14 @@ use crate::scheme;
 use crate::scheme::internal;
 
 use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
+use crate::parser::Parser;
 use crate::scheme::RequestHandle;
 pub use connection_hdl::{ConnectionHdl, RequestError};
 use receiver::ReceiverHdl;
 pub use sender::SenderHdl;
-use crate::parser::Parser;
 
 #[derive(Debug)]
-enum ConnectionMessage<P: Parser>{
+enum ConnectionMessage<P: Parser> {
     Close,
     Request {
         data: P::OurRequest,
@@ -55,14 +55,11 @@ struct Connection<P: Parser> {
 
 impl<P: Parser> Connection<P> {
     pub fn new(
-        rx: mpsc::Receiver<
-            ConnectionMessage<P>,
-        >,
+        rx: mpsc::Receiver<ConnectionMessage<P>>,
         stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     ) -> Self {
         let (internal_tx, internal_rx) = mpsc::channel(1);
-        let internal_hdl: InternalHdl<P> =
-            InternalHdl::new(internal_tx);
+        let internal_hdl: InternalHdl<P> = InternalHdl::new(internal_tx);
         let (sender, receiver) = stream.split();
 
         let sender_hdl = SenderHdl::new(internal_hdl.clone(), sender);
@@ -105,10 +102,7 @@ impl<P: Parser> Connection<P> {
         self.cancel_requests().await
     }
 
-    async fn handle_external(
-        &mut self,
-        message: ConnectionMessage<P>,
-    ) -> ControlFlow<()> {
+    async fn handle_external(&mut self, message: ConnectionMessage<P>) -> ControlFlow<()> {
         match message {
             ConnectionMessage::Event(event) => {
                 self.sender_hdl.send(internal::Message::Event(event)).await;
@@ -133,10 +127,7 @@ impl<P: Parser> Connection<P> {
         ControlFlow::Continue(())
     }
 
-    async fn handle_internal(
-        &mut self,
-        message: InternalMessage<P>,
-    ) -> ControlFlow<()> {
+    async fn handle_internal(&mut self, message: InternalMessage<P>) -> ControlFlow<()> {
         match message {
             InternalMessage::Close => {
                 return ControlFlow::Break(());
@@ -149,10 +140,7 @@ impl<P: Parser> Connection<P> {
         ControlFlow::Continue(())
     }
 
-    fn external_new_request_handler(
-        &mut self,
-        hdl: mpsc::Sender<RequestHandle<P>>,
-    ) {
+    fn external_new_request_handler(&mut self, hdl: mpsc::Sender<RequestHandle<P>>) {
         println!("new request handler");
         self.request_listeners.push(hdl);
     }
@@ -232,6 +220,7 @@ impl<P: Parser> Connection<P> {
 mod tests {
     use crate::connection::connection_hdl::RequestError;
     use crate::connection::ConnectionHdl;
+    use crate::parser::StringParser;
     use crate::scheme::internal;
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};
@@ -241,7 +230,6 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
     use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
-    use crate::parser::StringParser;
 
     type ConHdlType = ConnectionHdl<StringParser>;
 

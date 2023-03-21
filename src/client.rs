@@ -1,15 +1,10 @@
 use crate::connection::ConnectionHdl;
+use crate::parser::Parser;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite;
 use url::Url;
-use crate::parser::Parser;
 
-pub async fn connect<P: Parser>(
-    url: Url,
-) -> Result<
-    ConnectionHdl<P>,
-    tungstenite::error::Error,
-> {
+pub async fn connect<P: Parser>(url: Url) -> Result<ConnectionHdl<P>, tungstenite::error::Error> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
     let connection_hdl = ConnectionHdl::new(ws_stream).await;
 
@@ -20,13 +15,13 @@ pub async fn connect<P: Parser>(
 mod tests {
     use crate::client::connect;
     use crate::connection;
+    use crate::parser::StringParser;
     use std::ops::ControlFlow;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
     use url::Url;
-    use crate::parser::StringParser;
 
     type ConnectionHdl = connection::ConnectionHdl<StringParser>;
 
@@ -50,11 +45,10 @@ mod tests {
         };
         let url = format!("ws://{addr}");
 
-        let client_hdl = connect::<StringParser>(
-            Url::parse(url.as_str()).expect("Problem parsing url"),
-        )
-        .await
-        .expect("Problem connecting to the server");
+        let client_hdl =
+            connect::<StringParser>(Url::parse(url.as_str()).expect("Problem parsing url"))
+                .await
+                .expect("Problem connecting to the server");
 
         let message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
