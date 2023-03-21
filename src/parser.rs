@@ -6,38 +6,31 @@ use serde::{Deserialize, Serialize};
 /// # Examples
 /// See [StringParser]
 pub trait Parser: Clone + 'static {
+    /// OurRequest is a request that we can send.
+    /// The other connection should send [Self::TheirReply] in response
     type OurRequest: Serialize + Send + 'static;
+
+    /// OurReply is a reply that the user should
+    /// send in response to [Self::TheirRequest].
     type OurReply: Serialize + Send + 'static;
+
+    /// OurEvent is a event that we can send.
     type OurEvent: Serialize + Send + 'static;
+
+    /// TheirRequest is a request that we can receive.
+    /// The user should send [Self::TheirReply] in response.
     type TheirRequest: for<'a> Deserialize<'a> + Clone + Send + 'static;
+
+    /// TheirReply is a reply that we can receive
+    /// in response to [Self::OurRequest].
     type TheirReply: for<'a> Deserialize<'a> + Clone + Send + 'static;
+
+    /// TheirEvent is a event that we can receive.
     type TheirEvent: for<'a> Deserialize<'a> + Clone + Send + 'static;
-
-    fn our_request_to_string(request: &Self::OurRequest) -> serde_json::error::Result<String> {
-        serde_json::to_string(request)
-    }
-
-    fn our_reply_to_string(reply: &Self::OurReply) -> serde_json::error::Result<String> {
-        serde_json::to_string(reply)
-    }
-
-    fn our_event_to_string(event: &Self::OurEvent) -> serde_json::error::Result<String> {
-        serde_json::to_string(event)
-    }
-
-    fn their_request_from_string(str: &str) -> serde_json::error::Result<Self::TheirRequest> {
-        serde_json::from_str(str)
-    }
-
-    fn their_reply_from_string(str: &str) -> serde_json::error::Result<Self::TheirReply> {
-        serde_json::from_str(str)
-    }
-
-    fn their_event_from_string(str: &str) -> serde_json::error::Result<Self::TheirEvent> {
-        serde_json::from_str(str)
-    }
 }
 
+/// Used for testing.
+/// All types are String.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StringParser;
 
