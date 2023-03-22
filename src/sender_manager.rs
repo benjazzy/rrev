@@ -42,6 +42,15 @@ impl<T> SenderManager<T> {
         item.into()
     }
 
+    // pub fn collect_senders(&self) -> &Vec<&T> {
+    //     &self
+    //         .senders
+    //         .iter()
+    //         .filter(|s| !s.is_empty())
+    //         .map(|s| &s.unwrap())
+    //         .collect::<Vec<&T>>()
+    // }
+
     fn get_senders(&self) -> &Vec<Item<T>> {
         &self.senders
     }
@@ -51,6 +60,23 @@ impl<T> SenderManager<T> {
             && !matches!(self.senders.get(self.next), Some(Item::Empty))
         {
             self.next += 1;
+        }
+    }
+}
+
+impl<T> Item<T> {
+    pub fn is_empty(&self) -> bool {
+        if let Item::Empty = self {
+            return true;
+        }
+
+        false
+    }
+
+    pub fn unwrap(self) -> T {
+        match self {
+            Item::Sender(s) => s,
+            Item::Empty => panic!("Cannot unwrap Item::Empty"),
         }
     }
 }

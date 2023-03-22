@@ -1,5 +1,6 @@
-use crate::connection::ConnectionHdl;
+use crate::connection::{ConnectionEvent, ConnectionHdl};
 use crate::parser::Parser;
+use crate::server::server_event::ServerEvent;
 use crate::server::{Error, Server};
 use std::net::SocketAddr;
 use tokio::sync::oneshot::error::RecvError;
@@ -21,6 +22,11 @@ pub enum ServerMessage<P: Parser> {
     GetClients(oneshot::Sender<Result<Vec<SocketAddr>, Error>>),
 
     NewConnection(ConnectionHdl<P>, SocketAddr),
+
+    ConnectionEvent {
+        from: SocketAddr,
+        event: ConnectionEvent<P>,
+    },
 
     /// Sends a request to a client.
     /// # Arguments
@@ -55,19 +61,29 @@ pub struct AcceptorsServerHandle<P: Parser> {
     tx: mpsc::Sender<ServerMessage<P>>,
 }
 
+/// Used to manage the server externally.
+#[derive(Debug, Clone)]
+pub struct PassersServerHandle<P: Parser> {
+    /// Sender to send ServerMessages to the server.
+    tx: mpsc::Sender<ServerMessage<P>>,
+}
+
 impl<P: Parser> ServerHandle<P> {
     /// Creates a new ServerHandler and Server.
     /// Returns the handler and starts the Server.
     ///
     /// # Arguments
     /// * `listen_addr` - Addresses to listen on
-    pub async fn new(listen_addr: String) -> tokio::io::Result<Self> {
-        let (tx, rx) = mpsc::channel(1);
+    pub async fn new(
+        listen_addr: String,
+        server_event_tx: mpsc::Sender<ServerEvent<P>>,
+    ) -> tokio::io::Result<Self> {
+        let (hdl_tx, hdl_rx) = mpsc::channel(1);
 
-        let server = Server::<P>::new(rx, tx.clone(), listen_addr).await?;
+        let server = Server::<P>::new(hdl_rx, hdl_tx.clone(), server_event_tx, listen_addr).await?;
         tokio::spawn(server.run());
 
-        Ok(ServerHandle { tx })
+        Ok(ServerHandle { tx: hdl_tx })
     }
 
     /// Closes the server.
@@ -115,6 +131,22 @@ impl<P: Parser> AcceptorsServerHandle<P> {
     /// # Arguments
     /// * `connection_hdl` - The handle of the new connection.
     pub async fn new_connection(&self, connection_hdl: ConnectionHdl<P>, addr: SocketAddr) {
-        self.tx.send(ServerMessage::NewConnection(connection_hdl, addr)).await;
+        self.tx
+            .send(ServerMessage::NewConnection(connection_hdl, addr))
+            .await;
+    }
+}
+
+impl<P: Parser> PassersServerHandle<P> {
+    pub async fn new_connection_event(&self, event: ConnectionEvent<P>, from: SocketAddr) {
+        self.tx
+            .send(ServerMessage::ConnectionEvent { from, event })
+            .await;
+    }
+}
+
+impl<P: Parser> From<AcceptorsServerHandle<P>> for PassersServerHandle<P> {
+    fn from(value: AcceptorsServerHandle<P>) -> Self {
+        PassersServerHandle { tx: value.tx }
     }
 }

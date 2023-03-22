@@ -1,13 +1,16 @@
 mod acceptor;
+mod connection_passer;
 mod error;
 mod listener;
+mod server_event;
 mod server_handle;
 mod upgrader;
 
 use crate::connection;
-use crate::connection::ConnectionHdl;
+use crate::connection::{ConnectionEvent, ConnectionHdl};
 use crate::parser::Parser;
 use crate::server::acceptor::AcceptorHandle;
+use crate::server::server_event::ServerEvent;
 use crate::server::server_handle::AcceptorsServerHandle;
 pub use error::Error;
 pub use listener::ListenerHandle;
@@ -22,6 +25,8 @@ use tracing::{error, warn};
 struct Server<P: Parser> {
     rx: mpsc::Receiver<ServerMessage<P>>,
 
+    tx: mpsc::Sender<ServerEvent<P>>,
+
     connections: HashMap<SocketAddr, connection::ConnectionHdl<P>>,
 
     acceptor_hdl: AcceptorHandle,
@@ -32,15 +37,17 @@ struct Server<P: Parser> {
 impl<P: Parser> Server<P> {
     pub async fn new(
         rx: mpsc::Receiver<ServerMessage<P>>,
-        tx: mpsc::Sender<ServerMessage<P>>,
+        message_tx: mpsc::Sender<ServerMessage<P>>,
+        event_tx: mpsc::Sender<ServerEvent<P>>,
         listen_addr: String,
     ) -> tokio::io::Result<Self> {
-        let acceptors_server_hdl = AcceptorsServerHandle::new(tx);
+        let acceptors_server_hdl = AcceptorsServerHandle::new(message_tx);
         let acceptor_hdl = AcceptorHandle::new(acceptors_server_hdl);
         let listener_hdl = ListenerHandle::new(acceptor_hdl.clone().into(), listen_addr).await?;
 
         Ok(Server {
             rx,
+            tx: event_tx,
             connections: HashMap::new(),
             acceptor_hdl,
             listener_hdl,
@@ -70,6 +77,9 @@ impl<P: Parser> Server<P> {
             ServerMessage::GetClients(tx) => self.get_clients(tx).await,
             ServerMessage::NewConnection(connection, addr) => {
                 self.new_connection(connection, addr).await
+            }
+            ServerMessage::ConnectionEvent { event, from } => {
+                self.connection_event(event, from).await;
             }
         };
     }
@@ -101,6 +111,26 @@ impl<P: Parser> Server<P> {
 
         self.connections.insert(addr, connection);
     }
+
+    async fn connection_event(&self, event: ConnectionEvent<P>, addr: SocketAddr) {
+        let server_event = match event {
+            ConnectionEvent::Close => ServerEvent::ConnectionClose(addr),
+            ConnectionEvent::EventMessage(e) => {
+                ServerEvent::ConnectionEvent(server_event::ConnectionEvent {
+                    from: addr,
+                    event: e,
+                })
+            }
+            ConnectionEvent::RequestMessage(r) => {
+                ServerEvent::ConnectionRequest(server_event::ConnectionRequest {
+                    from: addr,
+                    request: r,
+                })
+            }
+        };
+
+        self.tx.send(server_event).await;
+    }
 }
 
 #[cfg(test)]
@@ -110,14 +140,17 @@ mod tests {
     use crate::server::server_handle::ServerHandle;
     use std::net::SocketAddr;
     use std::time::Duration;
+    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn check_get_address() {
         let ip = "127.0.0.1";
 
-        let server_hdl = ServerHandle::<StringParser>::new(format!("{ip}:0").to_string())
-            .await
-            .expect("Problem starting server");
+        let (server_tx, _server_rx) = mpsc::channel(1);
+        let server_hdl =
+            ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
+                .await
+                .expect("Problem starting server");
 
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
@@ -131,9 +164,11 @@ mod tests {
     #[tokio::test]
     async fn check_get_clients() {
         let ip = "127.0.0.1";
-        let server_hdl = ServerHandle::<StringParser>::new(format!("{ip}:0").to_string())
-            .await
-            .expect("Problem starting server");
+        let (server_tx, _server_rx) = mpsc::channel(1);
+        let server_hdl =
+            ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
+                .await
+                .expect("Problem starting server");
 
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
@@ -153,7 +188,10 @@ mod tests {
         // Connect with a client and check that a client was added.
         let url =
             url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
-        let connection_hdl = connect::<StringParser>(url)
+
+        let (client_tx, _client_rx) = mpsc::channel(1);
+
+        let connection_hdl = connect::<StringParser>(url, client_tx)
             .await
             .expect("Problem connecting to server.");
 
@@ -164,7 +202,5 @@ mod tests {
         assert_eq!(clients.len(), 1);
         let first = clients.get(0).expect("Problem getting first client.");
         assert_eq!(first.ip().to_string(), ip.to_string());
-
-
     }
 }

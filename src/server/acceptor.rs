@@ -1,7 +1,7 @@
-use crate::server::ListenerHandle;
+use crate::server::{connection_passer, ListenerHandle};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, warn};
@@ -52,7 +52,13 @@ impl<P: Parser> Acceptor<P> {
         match ws_stream {
             Ok(ws_stream) => {
                 debug!("Accepted new websocket stream from address: {addr}");
-                let connection_hdl = ConnectionHdl::<P>::new(ws_stream).await;
+                let (tx, rx) = mpsc::channel(1);
+                let connection_hdl = ConnectionHdl::<P>::new(ws_stream, tx).await;
+                tokio::spawn(connection_passer::pass_messages(
+                    rx,
+                    self.server_hdl.clone().into(),
+                    addr,
+                ));
                 self.server_hdl.new_connection(connection_hdl, addr).await;
             }
             Err(e) => {
