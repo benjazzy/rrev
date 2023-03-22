@@ -149,7 +149,7 @@ impl<P: Parser> Connection<P> {
 
     async fn handle_internal_request(&self, request: internal::Request<P::TheirRequest>) {
         let handle = RequestHandle::new(request, self.sender_hdl.clone());
-        self.event_tx.send(ConnectionEvent::RequestMessage(handle));
+        self.event_tx.send(ConnectionEvent::RequestMessage(handle)).await;
     }
 
     async fn handle_internal_reply(&mut self, reply: internal::Reply<P::TheirReply>) {
@@ -163,7 +163,7 @@ impl<P: Parser> Connection<P> {
     }
 
     async fn handle_internal_event(&self, event: P::TheirEvent) {
-        self.event_tx.send(ConnectionEvent::EventMessage(event));
+        self.event_tx.send(ConnectionEvent::EventMessage(event)).await;
     }
 
     async fn send_request(
