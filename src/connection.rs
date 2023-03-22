@@ -22,9 +22,10 @@ use crate::{scheme, sender_manager};
 
 use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
 use crate::parser::Parser;
+pub use crate::request_error::RequestError;
 use crate::scheme::RequestHandle;
 use crate::sender_manager::SenderManager;
-pub use connection_hdl::{ConnectionHdl, RequestError};
+pub use connection_hdl::ConnectionHdl;
 pub use event::ConnectionEvent;
 use receiver::ReceiverHdl;
 pub use sender::SenderHdl;
@@ -99,7 +100,8 @@ impl<P: Parser> Connection<P> {
 
         debug!("Connection closing.");
         self.close().await;
-        self.cancel_requests().await
+        self.cancel_requests().await;
+        self.event_tx.send(ConnectionEvent::Close).await;
     }
 
     async fn handle_external(&mut self, message: ConnectionMessage<P>) -> ControlFlow<()> {
@@ -149,7 +151,9 @@ impl<P: Parser> Connection<P> {
 
     async fn handle_internal_request(&self, request: internal::Request<P::TheirRequest>) {
         let handle = RequestHandle::new(request, self.sender_hdl.clone());
-        self.event_tx.send(ConnectionEvent::RequestMessage(handle)).await;
+        self.event_tx
+            .send(ConnectionEvent::RequestMessage(handle))
+            .await;
     }
 
     async fn handle_internal_reply(&mut self, reply: internal::Reply<P::TheirReply>) {
@@ -163,7 +167,9 @@ impl<P: Parser> Connection<P> {
     }
 
     async fn handle_internal_event(&self, event: P::TheirEvent) {
-        self.event_tx.send(ConnectionEvent::EventMessage(event)).await;
+        self.event_tx
+            .send(ConnectionEvent::EventMessage(event))
+            .await;
     }
 
     async fn send_request(
@@ -201,9 +207,9 @@ impl<P: Parser> Connection<P> {
 
 #[cfg(test)]
 mod tests {
-    use crate::connection::connection_hdl::RequestError;
     use crate::connection::{ConnectionEvent, ConnectionHdl};
     use crate::parser::StringParser;
+    use crate::request_error::RequestError;
     use crate::scheme::internal;
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};

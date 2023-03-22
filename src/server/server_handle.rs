@@ -1,10 +1,14 @@
-use crate::connection::{ConnectionEvent, ConnectionHdl};
+use crate::connection::{ConnectionEvent, ConnectionHdl, SenderHdl};
 use crate::parser::Parser;
+use crate::scheme::RequestHandle;
 use crate::server::server_event::ServerEvent;
+use crate::server::server_handle::ServerMessage::SendRequest;
 use crate::server::{Error, Server};
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
+use crate::request_error::RequestError;
 
 /// Messages that can be passed to the server.
 /// They can by passed in by any server handler.
@@ -33,7 +37,8 @@ pub enum ServerMessage<P: Parser> {
     /// * `to` - Client url to send the request to.
     /// * `request` - Request to send.
     SendRequest {
-        to: String,
+        to: SocketAddr,
+        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
         request: P::OurRequest,
     },
 
@@ -42,7 +47,7 @@ pub enum ServerMessage<P: Parser> {
     /// * `to` - Client url to send the event to.
     /// * `event` - Event to send.
     SendEvent {
-        to: String,
+        to: SocketAddr,
         event: P::OurEvent,
     },
 }
@@ -113,6 +118,32 @@ impl<P: Parser> ServerHandle<P> {
         match result {
             Ok(r) => r,
             Err(_) => Err(Error::RecvError),
+        }
+    }
+
+    pub async fn request(
+        &self,
+        to: SocketAddr,
+        request: P::OurRequest,
+    ) -> Result<P::TheirReply, RequestError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(SendRequest { to, tx, request }).await;
+
+        match rx.await {
+            Ok(r) => r,
+            Err(e) => Err(RequestError::Recv(e)),
+        }
+    }
+
+    pub async fn request_timeout(
+        &self,
+        to: SocketAddr,
+        request: P::OurRequest,
+        timeout: Duration,
+    ) -> Result<P::TheirReply, RequestError> {
+        match tokio::time::timeout(timeout, self.request(to, request)).await {
+            Ok(result) => result,
+            Err(_) => return Err(RequestError::Timeout),
         }
     }
 }

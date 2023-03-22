@@ -1,8 +1,10 @@
 #![feature(assert_matches)]
+#![feature(async_closure)]
 
 pub mod client;
 mod connection;
 pub mod parser;
+mod request_error;
 mod scheme;
 mod sender_manager;
 pub mod server;
