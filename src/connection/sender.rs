@@ -3,7 +3,6 @@ use crate::parser::Parser;
 use crate::scheme::internal;
 use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
-use serde::{Deserialize, Serialize};
 use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -12,7 +11,6 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::error;
 
 use super::internal_hdl;
-use crate::scheme::internal::Request;
 
 pub enum SenderMessage<P: Parser> {
     Message(internal::Message<P::OurRequest, P::OurReply, P::OurEvent>),
@@ -181,9 +179,7 @@ mod tests {
 
         let (write, _) = ws_stream.split();
 
-        let sender_hdl = SenderHdl::new(internal_hdl, write);
-
-        sender_hdl
+        SenderHdl::new(internal_hdl, write)
     }
 
     #[tokio::test]

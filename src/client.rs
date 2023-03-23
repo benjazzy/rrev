@@ -1,7 +1,6 @@
 pub use crate::connection::{ConnectionEvent, ConnectionHdl};
 use crate::parser::Parser;
-use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 use url::Url;
 
@@ -21,12 +20,11 @@ mod tests {
     use crate::connection;
     use crate::connection::ConnectionEvent;
     use crate::parser::StringParser;
-    use std::assert_matches::assert_matches;
     use std::ops::ControlFlow;
     use std::time::Duration;
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::{broadcast, mpsc};
-    use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+    use tokio::net::TcpListener;
+    use tokio::sync::mpsc;
+    use tokio_tungstenite::MaybeTlsStream;
     use url::Url;
 
     type ConnectionHdl = connection::ConnectionHdl<StringParser>;
@@ -96,6 +94,11 @@ mod tests {
             ConnectionEvent::EventMessage(e) => assert_eq!(e, event.to_string()),
             ConnectionEvent::RequestMessage(_) => panic!("Got request from client."),
         }
+
+        close_tx
+            .send(())
+            .await
+            .expect("Problem sending close message to the server.");
     }
 
     #[derive(Debug, Clone)]

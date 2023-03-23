@@ -15,15 +15,16 @@ pub enum ClientsError {
 
 impl std::fmt::Display for ListenAddrError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let message = match self {
-            ListenAddrError::Io(e) => "Io error getting listen address: {e}",
-            ListenAddrError::SendError => "There was a problem sending the message.",
+        match self {
+            ListenAddrError::Io(e) => write!(f, "Io error getting listen address: {e}"),
+            ListenAddrError::SendError => write!(f, "There was a problem sending the message."),
             ListenAddrError::RecvError => {
-                "There was a problem receiving the address from the server."
+                write!(
+                    f,
+                    "There was a problem receiving the address from the server."
+                )
             }
-        };
-
-        write!(f, "{message}")
+        }
     }
 }
 

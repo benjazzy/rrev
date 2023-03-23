@@ -2,7 +2,6 @@ use crate::error::SendError;
 use crate::server::{acceptor::ListenersAcceptorHandle, error::ListenAddrError};
 use std::net::SocketAddr;
 use tokio::io;
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 use super::Listener;
@@ -80,6 +79,6 @@ impl ListenerHandle {
             .map_err(|_| ListenAddrError::SendError)?;
         let addr = rx.await.map_err(|_| ListenAddrError::RecvError)?;
 
-        return addr.map_err(|e| ListenAddrError::Io(e));
+        addr.map_err(ListenAddrError::Io)
     }
 }

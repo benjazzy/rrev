@@ -8,7 +8,6 @@ mod connection;
 pub mod error;
 pub mod parser;
 mod scheme;
-mod sender_manager;
 pub mod server;
 
 pub use scheme::Requestable;

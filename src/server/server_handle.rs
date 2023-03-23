@@ -1,15 +1,12 @@
-use crate::connection::{ConnectionEvent, ConnectionHdl, SenderHdl};
+use crate::connection::{ConnectionEvent, ConnectionHdl};
 use crate::error::{RequestError, SendError, TimeoutError};
 use crate::parser::Parser;
-use crate::scheme::RequestHandle;
 use crate::server::error::{ClientsError, ListenAddrError};
 use crate::server::server_event::ServerEvent;
 use crate::server::server_handle::ServerMessage::SendRequest;
 use crate::server::Server;
-use futures_util::TryFutureExt;
 use std::net::SocketAddr;
 use std::time::Duration;
-use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 
 /// Messages that can be passed to the server.
@@ -153,8 +150,8 @@ impl<P: Parser> ServerHandle<P> {
         timeout: Duration,
     ) -> Result<P::TheirReply, TimeoutError> {
         match tokio::time::timeout(timeout, self.request(to, request)).await {
-            Ok(result) => result.map_err(|e| TimeoutError::RequestError(e)),
-            Err(_) => return Err(TimeoutError::Timeout),
+            Ok(result) => result.map_err(TimeoutError::RequestError),
+            Err(_) => Err(TimeoutError::Timeout),
         }
     }
 

@@ -18,40 +18,36 @@ async fn main() {
 
     info!("Echo server listening on address {listen_addr}");
 
-    loop {
-        if let Some(server_event) = rx.recv().await {
-            match server_event {
-                ServerEvent::Close => break,
-                ServerEvent::NewConnection(addr) => {
-                    info!("New connection from {addr}.");
-                }
-                ServerEvent::ConnectionClose(addr) => {
-                    info!("Connection {addr} closed.");
-                }
-                ServerEvent::ConnectionRequest(request) => {
-                    info!(
-                        "Got request {} from {}.",
-                        request.request.get_request(),
-                        request.from
-                    );
-                    if let Err(e) = request
-                        .request
-                        .complete(request.request.get_request().clone())
-                        .await
-                    {
-                        error!("Problem completing request: {e}");
-                    }
-                }
-                ServerEvent::ConnectionEvent(event) => {
-                    info!("Got event {} from {}.", event.event, event.from);
-                    server_hdl
-                        .event(event.from, event.event.clone())
-                        .await
-                        .expect("Problem sending server event");
+    while let Some(server_event) = rx.recv().await {
+        match server_event {
+            ServerEvent::Close => break,
+            ServerEvent::NewConnection(addr) => {
+                info!("New connection from {addr}.");
+            }
+            ServerEvent::ConnectionClose(addr) => {
+                info!("Connection {addr} closed.");
+            }
+            ServerEvent::ConnectionRequest(request) => {
+                info!(
+                    "Got request {} from {}.",
+                    request.request.get_request(),
+                    request.from
+                );
+                if let Err(e) = request
+                    .request
+                    .complete(request.request.get_request().clone())
+                    .await
+                {
+                    error!("Problem completing request: {e}");
                 }
             }
-        } else {
-            break;
+            ServerEvent::ConnectionEvent(event) => {
+                info!("Got event {} from {}.", event.event, event.from);
+                server_hdl
+                    .event(event.from, event.event.clone())
+                    .await
+                    .expect("Problem sending server event");
+            }
         }
     }
 

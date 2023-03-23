@@ -2,12 +2,9 @@ use crate::connection::ConnectionEvent;
 use crate::error::SendError;
 use crate::error::{RequestError, TimeoutError};
 use crate::parser::Parser;
-use crate::scheme::RequestHandle;
-use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::{Connection, ConnectionMessage};
@@ -55,7 +52,7 @@ impl<P: Parser> ConnectionHdl<P> {
 
         match rx.await {
             Ok(r) => r,
-            Err(e) => Err(RequestError::RecvError),
+            Err(_) => Err(RequestError::RecvError),
         }
     }
 
@@ -65,8 +62,8 @@ impl<P: Parser> ConnectionHdl<P> {
         timeout: Duration,
     ) -> Result<P::TheirReply, TimeoutError> {
         match tokio::time::timeout(timeout, self.request(request)).await {
-            Ok(result) => result.map_err(|e| TimeoutError::RequestError(e)),
-            Err(_) => return Err(TimeoutError::Timeout),
+            Ok(result) => result.map_err(TimeoutError::RequestError),
+            Err(_) => Err(TimeoutError::Timeout),
         }
     }
 

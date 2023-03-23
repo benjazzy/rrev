@@ -1,7 +1,3 @@
-use futures_util::{FutureExt, TryFutureExt};
-use serde::Serialize;
-use tokio::sync::oneshot;
-
 use crate::connection::SenderHdl;
 use crate::error::SendError;
 use crate::parser::Parser;

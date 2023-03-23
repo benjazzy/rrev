@@ -2,7 +2,6 @@ use crate::error::SendError;
 use crate::parser::Parser;
 use futures_util::stream::SplitStream;
 use futures_util::StreamExt;
-use serde::Deserialize;
 use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -66,10 +65,8 @@ impl<P: Parser> Receiver<P> {
 
     fn handle_connection_message(&self, message: ReceiverMessage) -> ControlFlow<()> {
         match message {
-            ReceiverMessage::Close => {
-                return ControlFlow::Break(());
-            }
-        };
+            ReceiverMessage::Close => ControlFlow::Break(()),
+        }
     }
 
     async fn handle_ws_message(
@@ -233,7 +230,7 @@ mod tests {
             data: message.to_string(),
         });
         let event = internal::Message::<String, String, String>::Event(message.to_string());
-        let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (client_tx, client_rx) = mpsc::channel(1);
 
         let (socket, addr) = socket().await;
         tokio::spawn(client(addr, client_rx));

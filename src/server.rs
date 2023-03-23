@@ -18,7 +18,6 @@ pub use server_handle::ServerHandle;
 use server_handle::ServerMessage;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, warn};
 
@@ -91,9 +90,9 @@ impl<P: Parser> Server<P> {
 
     async fn get_listen_address(&self, tx: oneshot::Sender<Result<SocketAddr, ListenAddrError>>) {
         let try_addr = self.listener_hdl.get_addr().await;
-        if let Err(_) = tx.send(try_addr) {
+        if tx.send(try_addr).is_err() {
             warn!("Problem sending listen address back to requester.");
-        };
+        }
     }
 
     async fn get_clients(&self, tx: oneshot::Sender<Result<Vec<SocketAddr>, ClientsError>>) {
@@ -102,14 +101,14 @@ impl<P: Parser> Server<P> {
             .keys()
             .collect::<Vec<&SocketAddr>>()
             .clone());
-        let clients = clients.into_iter().map(|c| c.clone()).collect();
-        if let Err(_) = tx.send(Ok(clients)) {
+        let clients = clients.into_iter().copied().collect::<Vec<SocketAddr>>();
+        if tx.send(Ok(clients)).is_err() {
             warn!("Problem sending clients back to requester.");
         }
     }
 
     async fn new_connection(&mut self, connection: ConnectionHdl<P>, addr: SocketAddr) {
-        if let Some(_) = self.connections.get(&addr) {
+        if self.connections.get(&addr).is_some() {
             error!("Got new connection from already connected address: {addr}");
             return;
         }
@@ -120,7 +119,7 @@ impl<P: Parser> Server<P> {
     async fn connection_event(&mut self, event: connection::ConnectionEvent<P>, addr: SocketAddr) {
         let server_event = match event {
             connection::ConnectionEvent::Close => {
-                if let None = self.connections.remove(&addr) {
+                if self.connections.remove(&addr).is_none() {
                     warn!("Connection closed that was not in out list of connections.");
                 }
 
@@ -261,7 +260,7 @@ mod tests {
         let url =
             url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
 
-        let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (client_tx, _client_rx) = mpsc::channel(1);
 
         let connection_hdl = connect::<StringParser>(url, client_tx)
             .await
@@ -313,7 +312,7 @@ mod tests {
         let request = "test request";
         let test_reply = "test reply";
         let ip = "127.0.0.1";
-        let (server_tx, mut server_rx) = mpsc::channel(1);
+        let (server_tx, _server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
@@ -331,9 +330,9 @@ mod tests {
         let url =
             url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
 
-        let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (client_tx, client_rx) = mpsc::channel(1);
 
-        let connection_hdl = connect::<StringParser>(url, client_tx)
+        let _connection_hdl = connect::<StringParser>(url, client_tx)
             .await
             .expect("Problem connecting to server.");
 
@@ -375,7 +374,7 @@ mod tests {
     async fn check_send_event() {
         let event = "test event";
         let ip = "127.0.0.1";
-        let (server_tx, mut server_rx) = mpsc::channel(1);
+        let (server_tx, _server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
@@ -395,7 +394,7 @@ mod tests {
 
         let (client_tx, mut client_rx) = mpsc::channel(1);
 
-        let connection_hdl = connect::<StringParser>(url, client_tx)
+        let _connection_hdl = connect::<StringParser>(url, client_tx)
             .await
             .expect("Problem connecting to server.");
 

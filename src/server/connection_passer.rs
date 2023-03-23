@@ -2,8 +2,7 @@ use crate::connection::ConnectionEvent;
 use crate::parser::Parser;
 use crate::server::server_handle::PassersServerHandle;
 use std::net::SocketAddr;
-use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tracing::warn;
 
 pub async fn pass_messages<P: Parser>(

@@ -5,9 +5,8 @@ use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::{io, net};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
-use crate::sender_manager::SenderManager;
 use crate::server::acceptor::ListenersAcceptorHandle;
 pub use listener_handle::ListenerHandle;
 use listener_handle::ListenerMessage;
@@ -111,7 +110,6 @@ mod tests {
     use crate::server::acceptor::{AcceptorHandle, AcceptorMessage};
     use crate::server::listener::ListenerHandle;
     use std::assert_matches::assert_matches;
-    use std::net::SocketAddr;
     use std::str;
     use std::time::Duration;
     use tokio::io;
@@ -190,7 +188,7 @@ mod tests {
             .write_all(message.as_bytes())
             .await
             .expect("Problem sending message to server.");
-        let recv_message = server_stream
+        let _ = server_stream
             .read_exact(&mut buf)
             .await
             .expect("Problem reading message.");
