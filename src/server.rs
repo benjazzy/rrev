@@ -4,7 +4,6 @@ mod error;
 mod listener;
 mod server_event;
 mod server_handle;
-mod upgrader;
 
 use crate::connection;
 use crate::connection::ConnectionHdl;
