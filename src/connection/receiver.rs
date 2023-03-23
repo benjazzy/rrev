@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
+use crate::error::SendError;
 
 use super::internal_hdl;
 
@@ -129,8 +130,8 @@ impl ReceiverHdl {
         ReceiverHdl { tx }
     }
 
-    pub async fn close(&self) {
-        let _ = self.tx.send(ReceiverMessage::Close).await;
+    pub async fn close(&self) -> Result<(), SendError> {
+        self.tx.send(ReceiverMessage::Close).await.map_err(|_| SendError)
     }
 }
 
