@@ -2,7 +2,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use websocket::client;
-use websocket::client::ConnectionEvent;
 use websocket::parser::StringParser;
 
 #[tokio::main]
@@ -11,7 +10,7 @@ async fn main() {
     let address = "127.0.0.1:8080";
     let url = url::Url::parse(format!("ws://{address}").as_str())
         .expect("Problem parsing url");
-    let (tx, rx) = mpsc::channel(1);
+    let (tx, _rx) = mpsc::channel(1);
     let client_hdl = client::connect::<StringParser>(url, tx).await
         .expect("Problem connecting to the server");
 

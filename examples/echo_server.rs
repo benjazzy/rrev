@@ -1,5 +1,5 @@
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{error, info};
 use websocket::parser::StringParser;
 use websocket::server::{ServerEvent, ServerHandle};
 
@@ -34,10 +34,12 @@ async fn main() {
                         request.request.get_request(),
                         request.from
                     );
-                    request
+                    if let Err(e) = request
                         .request
                         .complete(request.request.get_request().clone())
-                        .await;
+                        .await {
+                        error!("Problem completing request: {e}");
+                    }
                 }
                 ServerEvent::ConnectionEvent(event) => {
                     info!("Got event {} from {}.", event.event, event.from);

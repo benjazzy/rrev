@@ -17,7 +17,9 @@ async fn receive_events(mut rx: mpsc::Receiver<ConnectionEvent<StringParser>>) {
             }
             ConnectionEvent::RequestMessage(r) => {
                 info!("Got request {}", r.get_request());
-                r.complete(r.get_request().clone()).await;
+                if let Err(e) = r.complete(r.get_request().clone()).await {
+                    error!("Problem completing request {e}");
+                }
             }
         }
     }
@@ -40,7 +42,10 @@ async fn main() {
     loop {
         interval.tick().await;
         info!("Sending event \"count: {count}\"");
-        client_hdl.event(format!("count: {count}").to_string()).await;
+        if let Err(e) = client_hdl.event(format!("count: {count}").to_string()).await {
+            error!("Problem sending event. Exiting: {e}");
+            break;
+        }
         count += 1;
     }
 }

@@ -68,7 +68,7 @@ impl<P: Parser> ConnectionHdl<P> {
         }
     }
 
-    pub async fn event(&self, event: P::OurEvent) {
-        let _ = self.tx.send(ConnectionMessage::Event(event)).await;
+    pub async fn event(&self, event: P::OurEvent) -> Result<(), SendError> {
+        self.tx.send(ConnectionMessage::Event(event)).await.map_err(|_| SendError)
     }
 }
