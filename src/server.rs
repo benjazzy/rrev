@@ -71,12 +71,12 @@ impl<P: Parser> Server<P> {
 
     async fn handle_message(&mut self, message: ServerMessage<P>) {
         match message {
-            ServerMessage::Close => todo!(),
+            ServerMessage::Close => {}, // Close is handled in run().
             ServerMessage::GetListenAddress(tx) => self.get_listen_address(tx).await,
             ServerMessage::SendRequest { to, tx, request } => {
                 self.send_request(to, request, tx).await;
             }
-            ServerMessage::SendEvent { .. } => todo!(),
+            ServerMessage::SendEvent { to, event } => self.send_event(to, event).await,
             ServerMessage::GetClients(tx) => self.get_clients(tx).await,
             ServerMessage::NewConnection(connection, addr) => {
                 self.new_connection(connection, addr).await
@@ -144,6 +144,14 @@ impl<P: Parser> Server<P> {
     async fn send_request(&self, to: SocketAddr, request: P::OurRequest, tx: oneshot::Sender<Result<P::TheirReply, RequestError>>) {
         if let Some(connection_hdl) = self.connections.get(&to) {
             connection_hdl.request_with_sender(request, tx).await;
+        } else {
+            warn!("Unknown connection {to}.");
+        }
+    }
+
+    async fn send_event(&self, to: SocketAddr, event: P::OurEvent) {
+        if let Some(connection_hdl) = self.connections.get(&to) {
+            connection_hdl.event(event).await;
         } else {
             warn!("Unknown connection {to}.");
         }
@@ -302,5 +310,58 @@ mod tests {
             .expect("Problem getting reply");
 
         assert_eq!(server_reply, test_reply.to_string());
+    }
+
+    #[tokio::test]
+    async fn check_send_event() {
+        let event = "test event";
+        let ip = "127.0.0.1";
+        let (server_tx, mut server_rx) = mpsc::channel(1);
+        let server_hdl =
+            ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
+                .await
+                .expect("Problem starting server");
+
+        let address =
+            tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
+                .await
+                .expect("Timeout getting listen address.")
+                .expect("Problem receiving listen address.");
+
+        assert_eq!(address.ip().to_string(), ip.to_string());
+
+        // Connect with a client and check that a client was added.
+        let url =
+            url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
+
+        let (client_tx, mut client_rx) = mpsc::channel(1);
+
+        let connection_hdl = connect::<StringParser>(url, client_tx)
+            .await
+            .expect("Problem connecting to server.");
+
+        let clients = server_hdl
+            .get_clients()
+            .await
+            .expect("Problem getting clients.");
+        assert_eq!(clients.len(), 1);
+        let first = clients.get(0).expect("Problem getting first client.");
+        assert_eq!(first.ip().to_string(), ip.to_string());
+
+        // Send event.
+        server_hdl.event(*first, event.to_string()).await;
+
+        let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
+            .await
+            .expect("Timeout receiving event from the server")
+            .expect("Problem receiving event from the server");
+
+        let client_event = if let ConnectionEvent::EventMessage(event) = client_message {
+            event
+        } else {
+            panic!("Server sent incorrect event");
+        };
+
+        assert_eq!(client_event, event.to_string());
     }
 }

@@ -146,6 +146,10 @@ impl<P: Parser> ServerHandle<P> {
             Err(_) => return Err(RequestError::Timeout),
         }
     }
+
+    pub async fn event(&self, to: SocketAddr, event: P::OurEvent) {
+        self.tx.send(ServerMessage::SendEvent { to, event }).await;
+    }
 }
 
 impl<P: Parser> AcceptorsServerHandle<P> {
