@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 #[derive(Debug)]
 struct Server<P: Parser> {
@@ -80,7 +80,9 @@ impl<P: Parser> Server<P> {
             ServerMessage::SendEvent { to, event } => self.send_event(to, event).await,
             ServerMessage::GetClients(tx) => self.get_clients(tx).await,
             ServerMessage::NewConnection(connection, addr) => {
-                self.new_connection(connection, addr).await
+                debug!("New connection from {addr}");
+                self.new_connection(connection, addr).await;
+                self.tx.send(ServerEvent::NewConnection(addr)).await;
             }
             ServerMessage::ConnectionEvent { event, from } => {
                 self.connection_event(event, from).await;
@@ -195,6 +197,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn check_connect() {
+        let ip = "127.0.0.1";
+
+        let (server_tx, mut server_rx) = mpsc::channel(1);
+        let server_hdl =
+            ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
+                .await
+                .expect("Problem starting server");
+
+        let address =
+            tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
+                .await
+                .expect("Timeout getting listen address.")
+                .expect("Problem receiving listen address.");
+
+        assert_eq!(address.ip().to_string(), ip.to_string());
+
+        // Connect with a client and check that a client was added.
+        let url =
+            url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
+        let (client_tx, _client_rx) = mpsc::channel(1);
+        let _client_hdl = connect::<StringParser>(url, client_tx).await;
+
+        let server_message =
+            tokio::time::timeout(Duration::from_millis(100), server_rx.recv()).await
+                .expect("Timeout getting server message.")
+                .expect("Problem getting server message.");
+
+        let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
+            addr
+        } else {
+            panic!("Did not receive new connection message from the server");
+        };
+
+        assert_eq!(connection_addr.ip().to_string(), ip.to_string());
+    }
+
+    #[tokio::test]
     async fn check_get_clients() {
         let ip = "127.0.0.1";
         let (server_tx, mut server_rx) = mpsc::channel(1);
@@ -235,6 +275,20 @@ mod tests {
         assert_eq!(clients.len(), 1);
         let first = clients.get(0).expect("Problem getting first client.");
         assert_eq!(first.ip().to_string(), ip.to_string());
+
+        // Check that we receive a new connection event from the server.
+        let server_message =
+            tokio::time::timeout(Duration::from_millis(100), server_rx.recv()).await
+                .expect("Timeout getting server message.")
+                .expect("Problem getting server message.");
+
+        let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
+            addr
+        } else {
+            panic!("Did not receive new connection message from the server");
+        };
+
+        assert_eq!(connection_addr.ip().to_string(), ip.to_string());
 
         connection_hdl.close().await;
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())

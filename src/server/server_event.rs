@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 
 pub enum ServerEvent<P: Parser> {
     Close,
+    NewConnection(SocketAddr),
     ConnectionClose(SocketAddr),
     ConnectionRequest(ConnectionRequest<RequestHandle<P>>),
     ConnectionEvent(ConnectionEvent<P::TheirEvent>),

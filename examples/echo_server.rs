@@ -22,6 +22,9 @@ async fn main() {
         if let Some(server_event) = rx.recv().await {
             match server_event {
                 ServerEvent::Close => break,
+                ServerEvent::NewConnection(addr) => {
+                    info!("New connection from {addr}.");
+                }
                 ServerEvent::ConnectionClose(addr) => {
                     info!("Connection {addr} closed.");
                 }
