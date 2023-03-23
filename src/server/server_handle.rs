@@ -1,14 +1,14 @@
 use crate::connection::{ConnectionEvent, ConnectionHdl, SenderHdl};
-use crate::parser::Parser;
 use crate::error::{RequestError, SendError, TimeoutError};
+use crate::parser::Parser;
 use crate::scheme::RequestHandle;
+use crate::server::error::{ClientsError, ListenAddrError};
 use crate::server::server_event::ServerEvent;
 use crate::server::server_handle::ServerMessage::SendRequest;
 use crate::server::Server;
-use crate::server::error::{ ClientsError, ListenAddrError };
+use futures_util::TryFutureExt;
 use std::net::SocketAddr;
 use std::time::Duration;
-use futures_util::TryFutureExt;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 
@@ -95,12 +95,18 @@ impl<P: Parser> ServerHandle<P> {
 
     /// Closes the server.
     pub async fn close(&self) -> Result<(), SendError> {
-        self.tx.send(ServerMessage::Close).await.map_err(|_| SendError)
+        self.tx
+            .send(ServerMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 
     pub async fn get_listen_address(&self) -> Result<SocketAddr, ListenAddrError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(ServerMessage::GetListenAddress(tx)).await.map_err(|_| ListenAddrError::SendError)?;
+        self.tx
+            .send(ServerMessage::GetListenAddress(tx))
+            .await
+            .map_err(|_| ListenAddrError::SendError)?;
         let result = rx.await;
 
         match result {
@@ -129,7 +135,10 @@ impl<P: Parser> ServerHandle<P> {
         request: P::OurRequest,
     ) -> Result<P::TheirReply, RequestError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SendRequest { to, tx, request }).await.map_err(|_| RequestError::SendError)?;
+        self.tx
+            .send(SendRequest { to, tx, request })
+            .await
+            .map_err(|_| RequestError::SendError)?;
 
         match rx.await {
             Ok(r) => r,
@@ -150,7 +159,10 @@ impl<P: Parser> ServerHandle<P> {
     }
 
     pub async fn event(&self, to: SocketAddr, event: P::OurEvent) -> Result<(), SendError> {
-        self.tx.send(ServerMessage::SendEvent { to, event }).await.map_err(|_| SendError)
+        self.tx
+            .send(ServerMessage::SendEvent { to, event })
+            .await
+            .map_err(|_| SendError)
     }
 }
 
@@ -167,7 +179,11 @@ impl<P: Parser> AcceptorsServerHandle<P> {
     ///
     /// # Arguments
     /// * `connection_hdl` - The handle of the new connection.
-    pub async fn new_connection(&self, connection_hdl: ConnectionHdl<P>, addr: SocketAddr) -> Result<(), SendError> {
+    pub async fn new_connection(
+        &self,
+        connection_hdl: ConnectionHdl<P>,
+        addr: SocketAddr,
+    ) -> Result<(), SendError> {
         self.tx
             .send(ServerMessage::NewConnection(connection_hdl, addr))
             .await
@@ -176,7 +192,11 @@ impl<P: Parser> AcceptorsServerHandle<P> {
 }
 
 impl<P: Parser> PassersServerHandle<P> {
-    pub async fn new_connection_event(&self, event: ConnectionEvent<P>, from: SocketAddr) -> Result<(), SendError> {
+    pub async fn new_connection_event(
+        &self,
+        event: ConnectionEvent<P>,
+        from: SocketAddr,
+    ) -> Result<(), SendError> {
         self.tx
             .send(ServerMessage::ConnectionEvent { from, event })
             .await

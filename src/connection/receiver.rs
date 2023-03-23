@@ -1,3 +1,4 @@
+use crate::error::SendError;
 use crate::parser::Parser;
 use futures_util::stream::SplitStream;
 use futures_util::StreamExt;
@@ -8,7 +9,6 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{tungstenite, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, error};
-use crate::error::SendError;
 
 use super::internal_hdl;
 
@@ -131,7 +131,10 @@ impl ReceiverHdl {
     }
 
     pub async fn close(&self) -> Result<(), SendError> {
-        self.tx.send(ReceiverMessage::Close).await.map_err(|_| SendError)
+        self.tx
+            .send(ReceiverMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 }
 

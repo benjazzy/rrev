@@ -1,9 +1,9 @@
-use crate::server::{ acceptor::ListenersAcceptorHandle, error::ListenAddrError };
+use crate::error::SendError;
+use crate::server::{acceptor::ListenersAcceptorHandle, error::ListenAddrError};
 use std::net::SocketAddr;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
-use crate::error::SendError;
 
 use super::Listener;
 
@@ -59,7 +59,10 @@ impl ListenerHandle {
     }
 
     pub async fn close(&self) -> Result<(), SendError> {
-        self.tx.send(ListenerMessage::Close).await.map_err(|_| SendError)
+        self.tx
+            .send(ListenerMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 
     /// Gets the address of the running Listener.

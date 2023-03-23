@@ -7,9 +7,10 @@ mod server_handle;
 
 use crate::connection;
 use crate::connection::ConnectionHdl;
-use crate::parser::Parser;
 use crate::error::RequestError;
+use crate::parser::Parser;
 use crate::server::acceptor::AcceptorHandle;
+use crate::server::error::{ClientsError, ListenAddrError};
 use crate::server::server_handle::AcceptorsServerHandle;
 pub use listener::ListenerHandle;
 pub use server_event::{ConnectionEvent, ConnectionRequest, ServerEvent};
@@ -20,7 +21,6 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, warn};
-use crate::server::error::{ClientsError, ListenAddrError};
 
 #[derive(Debug)]
 struct Server<P: Parser> {
@@ -219,10 +219,10 @@ mod tests {
         let (client_tx, _client_rx) = mpsc::channel(1);
         let _client_hdl = connect::<StringParser>(url, client_tx).await;
 
-        let server_message =
-            tokio::time::timeout(Duration::from_millis(100), server_rx.recv()).await
-                .expect("Timeout getting server message.")
-                .expect("Problem getting server message.");
+        let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
+            .await
+            .expect("Timeout getting server message.")
+            .expect("Problem getting server message.");
 
         let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
             addr
@@ -276,10 +276,10 @@ mod tests {
         assert_eq!(first.ip().to_string(), ip.to_string());
 
         // Check that we receive a new connection event from the server.
-        let server_message =
-            tokio::time::timeout(Duration::from_millis(100), server_rx.recv()).await
-                .expect("Timeout getting server message.")
-                .expect("Problem getting server message.");
+        let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
+            .await
+            .expect("Timeout getting server message.")
+            .expect("Problem getting server message.");
 
         let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
             addr

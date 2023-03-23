@@ -21,8 +21,8 @@ use crate::scheme::internal;
 use crate::{scheme, sender_manager};
 
 use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
-use crate::parser::Parser;
 pub use crate::error::RequestError;
+use crate::parser::Parser;
 use crate::scheme::RequestHandle;
 use crate::sender_manager::SenderManager;
 pub use connection_hdl::ConnectionHdl;
@@ -208,8 +208,8 @@ impl<P: Parser> Connection<P> {
 #[cfg(test)]
 mod tests {
     use crate::connection::{ConnectionEvent, ConnectionHdl};
-    use crate::parser::StringParser;
     use crate::error::{RequestError, TimeoutError};
+    use crate::parser::StringParser;
     use crate::scheme::internal;
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};
@@ -510,6 +510,9 @@ mod tests {
             .await;
 
         // Assert that the request failed because of a close.
-        assert_eq!(Err(TimeoutError::RequestError(RequestError::Canceled)), close);
+        assert_eq!(
+            Err(TimeoutError::RequestError(RequestError::Canceled)),
+            close
+        );
     }
 }

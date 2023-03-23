@@ -37,13 +37,16 @@ async fn main() {
                     if let Err(e) = request
                         .request
                         .complete(request.request.get_request().clone())
-                        .await {
+                        .await
+                    {
                         error!("Problem completing request: {e}");
                     }
                 }
                 ServerEvent::ConnectionEvent(event) => {
                     info!("Got event {} from {}.", event.event, event.from);
-                    server_hdl.event(event.from, event.event.clone()).await
+                    server_hdl
+                        .event(event.from, event.event.clone())
+                        .await
                         .expect("Problem sending server event");
                 }
             }

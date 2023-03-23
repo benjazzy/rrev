@@ -1,3 +1,4 @@
+use crate::error::SendError;
 use crate::parser::Parser;
 use crate::scheme::internal;
 use futures_util::stream::SplitSink;
@@ -9,7 +10,6 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::error;
-use crate::error::SendError;
 
 use super::internal_hdl;
 use crate::scheme::internal::Request;
@@ -98,11 +98,20 @@ impl<P: Parser> SenderHdl<P> {
     }
 
     pub async fn close(&self) -> Result<(), SendError> {
-        self.tx.send(SenderMessage::Close).await.map_err(|_| SendError)
+        self.tx
+            .send(SenderMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 
-    pub async fn send(&self, message: internal::Message<P::OurRequest, P::OurReply, P::OurEvent>) -> Result<(), SendError> {
-        self.tx.send(SenderMessage::Message(message)).await.map_err(|_| SendError)
+    pub async fn send(
+        &self,
+        message: internal::Message<P::OurRequest, P::OurReply, P::OurEvent>,
+    ) -> Result<(), SendError> {
+        self.tx
+            .send(SenderMessage::Message(message))
+            .await
+            .map_err(|_| SendError)
     }
 }
 

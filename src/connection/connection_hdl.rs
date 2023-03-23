@@ -1,6 +1,7 @@
 use crate::connection::ConnectionEvent;
-use crate::parser::Parser;
+use crate::error::SendError;
 use crate::error::{RequestError, TimeoutError};
+use crate::parser::Parser;
 use crate::scheme::RequestHandle;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -8,7 +9,6 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use crate::error::SendError;
 
 use super::{Connection, ConnectionMessage};
 
@@ -32,7 +32,10 @@ impl<P: Parser> ConnectionHdl<P> {
     }
 
     pub async fn close(&self) -> Result<(), SendError> {
-        self.tx.send(ConnectionMessage::Close).await.map_err(|_| SendError)
+        self.tx
+            .send(ConnectionMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 
     pub async fn request_with_sender(
@@ -40,8 +43,7 @@ impl<P: Parser> ConnectionHdl<P> {
         request: P::OurRequest,
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     ) -> Result<(), RequestError> {
-        self
-            .tx
+        self.tx
             .send(ConnectionMessage::Request { data: request, tx })
             .await
             .map_err(|_| RequestError::SendError)
@@ -69,6 +71,9 @@ impl<P: Parser> ConnectionHdl<P> {
     }
 
     pub async fn event(&self, event: P::OurEvent) -> Result<(), SendError> {
-        self.tx.send(ConnectionMessage::Event(event)).await.map_err(|_| SendError)
+        self.tx
+            .send(ConnectionMessage::Event(event))
+            .await
+            .map_err(|_| SendError)
     }
 }

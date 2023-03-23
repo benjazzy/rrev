@@ -29,10 +29,10 @@ async fn receive_events(mut rx: mpsc::Receiver<ConnectionEvent<StringParser>>) {
 async fn main() {
     tracing_subscriber::fmt::init();
     let address = "127.0.0.1:8080";
-    let url = url::Url::parse(format!("ws://{address}").as_str())
-        .expect("Problem parsing url");
+    let url = url::Url::parse(format!("ws://{address}").as_str()).expect("Problem parsing url");
     let (tx, rx) = mpsc::channel(1);
-    let client_hdl = client::connect::<StringParser>(url, tx).await
+    let client_hdl = client::connect::<StringParser>(url, tx)
+        .await
         .expect("Problem connecting to the server");
 
     tokio::spawn(receive_events(rx));
@@ -42,7 +42,10 @@ async fn main() {
     loop {
         interval.tick().await;
         info!("Sending event \"count: {count}\"");
-        if let Err(e) = client_hdl.event(format!("count: {count}").to_string()).await {
+        if let Err(e) = client_hdl
+            .event(format!("count: {count}").to_string())
+            .await
+        {
             error!("Problem sending event. Exiting: {e}");
             break;
         }

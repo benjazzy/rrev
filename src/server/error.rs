@@ -18,7 +18,9 @@ impl std::fmt::Display for ListenAddrError {
         let message = match self {
             ListenAddrError::Io(e) => "Io error getting listen address: {e}",
             ListenAddrError::SendError => "There was a problem sending the message.",
-            ListenAddrError::RecvError => "There was a problem receiving the address from the server."
+            ListenAddrError::RecvError => {
+                "There was a problem receiving the address from the server."
+            }
         };
 
         write!(f, "{message}")
