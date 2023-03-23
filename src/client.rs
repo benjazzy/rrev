@@ -1,23 +1,16 @@
-use crate::connection::ConnectionHdl;
+use crate::connection::{ConnectionEvent, ConnectionHdl};
+use crate::parser::Parser;
 use serde::{Deserialize, Serialize};
+use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite;
 use url::Url;
 
-pub async fn connect<
-    OurReq: Serialize + Send + 'static,
-    OurRep: Serialize + Send + 'static,
-    OurEvent: Serialize + Send + 'static,
-    TheirReq: for<'a> Deserialize<'a> + Send + Clone + 'static,
-    TheirRep: for<'a> Deserialize<'a> + Send + Clone + 'static,
-    TheirEvent: for<'a> Deserialize<'a> + Send + Clone + 'static,
->(
+pub async fn connect<P: Parser>(
     url: Url,
-) -> Result<
-    ConnectionHdl<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
-    tungstenite::error::Error,
-> {
+    event_tx: mpsc::Sender<ConnectionEvent<P>>,
+) -> Result<ConnectionHdl<P>, tungstenite::error::Error> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
-    let connection_hdl = ConnectionHdl::new(ws_stream).await;
+    let connection_hdl = ConnectionHdl::new(ws_stream, event_tx).await;
 
     Ok(connection_hdl)
 }
@@ -26,23 +19,27 @@ pub async fn connect<
 mod tests {
     use crate::client::connect;
     use crate::connection;
+    use crate::connection::ConnectionEvent;
+    use crate::parser::StringParser;
+    use std::assert_matches::assert_matches;
     use std::ops::ControlFlow;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::mpsc;
+    use tokio::sync::{broadcast, mpsc};
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
     use url::Url;
 
-    type ConnectionHdl = connection::ConnectionHdl<String, String, String, String, String, String>;
+    type ConnectionHdl = connection::ConnectionHdl<StringParser>;
 
     #[tokio::test]
     async fn check_connect() {
         let event = "test event";
+        let (event_tx, mut event_rx) = mpsc::channel(1);
 
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let (close_tx, close_rx) = mpsc::channel(1);
 
-        tokio::spawn(server(server_tx, close_rx));
+        tokio::spawn(server(server_tx, event_tx.clone(), close_rx));
 
         let message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
@@ -51,12 +48,13 @@ mod tests {
 
         let addr = match message {
             ServerMessage::Address(a) => a,
-            ServerMessage::NewConnection(_) => panic!("Server sent incorrect message type."),
+            ServerMessage::NewConnection(..) => panic!("Server sent incorrect message type."),
         };
         let url = format!("ws://{addr}");
 
-        let client_hdl = connect::<String, String, String, String, String, String>(
+        let client_hdl = connect::<StringParser>(
             Url::parse(url.as_str()).expect("Problem parsing url"),
+            event_tx,
         )
         .await
         .expect("Problem connecting to the server");
@@ -71,24 +69,33 @@ mod tests {
             ServerMessage::NewConnection(c) => c,
         };
 
-        let (event_tx, mut event_rx) = mpsc::channel(1);
-
-        client_hdl.register_event_listener(event_tx.clone()).await;
-        server_hdl.register_event_listener(event_tx.clone()).await;
+        //
+        // client_hdl.register_event_listener(event_tx.clone()).await;
+        // server_hdl.register_event_listener(event_tx.clone()).await;
 
         client_hdl.event(event.to_string()).await;
         let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
             .await
-            .expect("Timeout getting event.");
+            .expect("Timeout getting event.")
+            .expect("Problem unwrapping event.");
         println!("Event: {:#?}", recv_event);
-        assert_eq!(recv_event, Some(event.to_string()));
+        match recv_event {
+            ConnectionEvent::Close => panic!("Got close from server."),
+            ConnectionEvent::EventMessage(e) => assert_eq!(e, event.to_string()),
+            ConnectionEvent::RequestMessage(_) => panic!("Got request from server."),
+        }
 
         server_hdl.event(event.to_string()).await;
         let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
             .await
-            .expect("Timeout getting event.");
+            .expect("Timeout getting event.")
+            .expect("Problem unwrapping event.");
         println!("Event: {:#?}", recv_event);
-        assert_eq!(recv_event, Some(event.to_string()));
+        match recv_event {
+            ConnectionEvent::Close => panic!("Got close from client."),
+            ConnectionEvent::EventMessage(e) => assert_eq!(e, event.to_string()),
+            ConnectionEvent::RequestMessage(_) => panic!("Got request from client."),
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -97,7 +104,11 @@ mod tests {
         Address(String),
     }
 
-    async fn server(tx: mpsc::Sender<ServerMessage>, mut rx: mpsc::Receiver<()>) {
+    async fn server(
+        server_tx: mpsc::Sender<ServerMessage>,
+        event_tx: mpsc::Sender<ConnectionEvent<StringParser>>,
+        mut rx: mpsc::Receiver<()>,
+    ) {
         let socket = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("Error binding on socket address");
@@ -107,7 +118,8 @@ mod tests {
 
         println!("Server listening on {addr}");
 
-        tx.send(ServerMessage::Address(addr.to_string()))
+        server_tx
+            .send(ServerMessage::Address(addr.to_string()))
             .await
             .expect("Problem sending address to test.");
 
@@ -120,8 +132,8 @@ mod tests {
                     let ws_stream = tokio_tungstenite::accept_async(maybe_tls).await
                         .expect("Problem upgrading stream to a websocket.");
 
-                    let connection_hdl = ConnectionHdl::new(ws_stream).await;
-                    tx.send(ServerMessage::NewConnection(connection_hdl)).await;
+                    let connection_hdl = ConnectionHdl::new(ws_stream, event_tx.clone()).await;
+                    server_tx.send(ServerMessage::NewConnection(connection_hdl)).await;
                     ControlFlow::Continue(())
                 },
                 _ = rx.recv() => { ControlFlow::Break(()) }

@@ -1,3 +1,4 @@
+use crate::parser::Parser;
 use crate::scheme::internal;
 use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
@@ -12,8 +13,8 @@ use tracing::error;
 use super::internal_hdl;
 use crate::scheme::internal::Request;
 
-pub enum SenderMessage<Req, Rep, Event> {
-    Message(internal::Message<Req, Rep, Event>),
+pub enum SenderMessage<P: Parser> {
+    Message(internal::Message<P::OurRequest, P::OurReply, P::OurEvent>),
     Close,
 }
 
@@ -21,36 +22,21 @@ pub enum SenderMessage<Req, Rep, Event> {
 /// Sender listens for messages sent from a handler and then serializes them
 /// and passes them onto the websocket sink.
 /// If a SenderMessage::Close is sent Sender will close its sink and shutdown.
-struct Sender<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
-> {
-    connection_hdl: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
-    rx: mpsc::Receiver<SenderMessage<OurReq, OurRep, OurEvent>>,
+struct Sender<P: Parser> {
+    connection_hdl: internal_hdl::InternalHdl<P>,
+    rx: mpsc::Receiver<SenderMessage<P>>,
     ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
 }
 
 #[derive(Debug)]
-pub struct SenderHdl<Req: Serialize, Rep: Serialize, Event: Serialize> {
-    tx: mpsc::Sender<SenderMessage<Req, Rep, Event>>,
+pub struct SenderHdl<P: Parser> {
+    tx: mpsc::Sender<SenderMessage<P>>,
 }
 
-impl<
-        OurReq: Serialize,
-        OurRep: Serialize,
-        OurEvent: Serialize,
-        TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
-        TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-        TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    > Sender<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
-{
+impl<P: Parser> Sender<P> {
     pub fn new(
-        connection_handle: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
-        rx: mpsc::Receiver<SenderMessage<OurReq, OurRep, OurEvent>>,
+        connection_handle: internal_hdl::InternalHdl<P>,
+        rx: mpsc::Receiver<SenderMessage<P>>,
         ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     ) -> Self {
         Sender {
@@ -68,10 +54,7 @@ impl<
         }
     }
 
-    async fn handle_message(
-        &mut self,
-        message: SenderMessage<OurReq, OurRep, OurEvent>,
-    ) -> ControlFlow<()> {
+    async fn handle_message(&mut self, message: SenderMessage<P>) -> ControlFlow<()> {
         match message {
             SenderMessage::Message(m) => {
                 self.send(m).await;
@@ -85,7 +68,7 @@ impl<
         ControlFlow::Continue(())
     }
 
-    async fn send(&mut self, request: internal::Message<OurReq, OurRep, OurEvent>) {
+    async fn send(&mut self, request: internal::Message<P::OurRequest, P::OurReply, P::OurEvent>) {
         let message_str = match serde_json::to_string(&request) {
             Ok(m) => m,
             Err(e) => {
@@ -100,18 +83,9 @@ impl<
     }
 }
 
-impl<
-        OurReq: Serialize + Send + 'static,
-        OurRep: Serialize + Send + 'static,
-        OurEvent: Serialize + Send + 'static,
-    > SenderHdl<OurReq, OurRep, OurEvent>
-{
-    pub fn new<
-        TheirReq: for<'a> Deserialize<'a> + Send + 'static + Clone,
-        TheirRep: for<'a> Deserialize<'a> + Send + 'static + Clone,
-        TheirEvent: for<'a> Deserialize<'a> + Send + 'static + Clone,
-    >(
-        connection_handle: internal_hdl::InternalHdl<TheirReq, TheirRep, TheirEvent>,
+impl<P: Parser> SenderHdl<P> {
+    pub fn new(
+        connection_handle: internal_hdl::InternalHdl<P>,
         ws_sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1);
@@ -126,12 +100,12 @@ impl<
         let _ = self.tx.send(SenderMessage::Close).await;
     }
 
-    pub async fn send(&self, message: internal::Message<OurReq, OurRep, OurEvent>) {
+    pub async fn send(&self, message: internal::Message<P::OurRequest, P::OurReply, P::OurEvent>) {
         let _ = self.tx.send(SenderMessage::Message(message)).await;
     }
 }
 
-impl<Req: Serialize, Rep: Serialize, Event: Serialize> Clone for SenderHdl<Req, Rep, Event> {
+impl<P: Parser> Clone for SenderHdl<P> {
     fn clone(&self) -> Self {
         SenderHdl {
             tx: self.tx.clone(),
@@ -144,6 +118,7 @@ mod tests {
     use crate::connection::internal_hdl;
     use crate::connection::internal_hdl::InternalHdl;
     use crate::connection::sender::SenderHdl;
+    use crate::parser::StringParser;
     use crate::scheme::internal;
     use crate::scheme::internal::Request;
     use futures_util::StreamExt;
@@ -181,10 +156,10 @@ mod tests {
         (socket, addr.to_string())
     }
 
-    async fn server(socket: TcpListener) -> SenderHdl<String, String, String> {
+    async fn server(socket: TcpListener) -> SenderHdl<StringParser> {
         let (internal_tx, _internal_rx) = mpsc::channel(1);
 
-        let internal_hdl: InternalHdl<(), (), ()> = internal_hdl::InternalHdl::new(internal_tx);
+        let internal_hdl: InternalHdl<StringParser> = internal_hdl::InternalHdl::new(internal_tx);
 
         let (stream, _) = socket.accept().await.expect("Error accepting connection.");
 

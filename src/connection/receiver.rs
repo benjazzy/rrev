@@ -1,3 +1,4 @@
+use crate::parser::Parser;
 use futures_util::stream::SplitStream;
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -20,12 +21,8 @@ enum ReceiverMessage {
 /// If the websocket message is a close message or unhandleable error Receiver
 /// calls close on Connection's internal handle to close the connection.
 /// Receiver also waits for a message from Connection and handles the message.
-struct Receiver<
-    Req: for<'a> Deserialize<'a>,
-    Rep: for<'a> Deserialize<'a>,
-    Event: for<'a> Deserialize<'a>,
-> {
-    connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
+struct Receiver<P: Parser> {
+    connection_handle: internal_hdl::InternalHdl<P>,
     rx: mpsc::Receiver<ReceiverMessage>,
     ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
 }
@@ -34,14 +31,9 @@ pub struct ReceiverHdl {
     tx: mpsc::Sender<ReceiverMessage>,
 }
 
-impl<
-        Req: for<'a> Deserialize<'a>,
-        Rep: for<'a> Deserialize<'a>,
-        Event: for<'a> Deserialize<'a>,
-    > Receiver<Req, Rep, Event>
-{
+impl<P: Parser> Receiver<P> {
     pub fn new(
-        connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
+        connection_handle: internal_hdl::InternalHdl<P>,
         rx: mpsc::Receiver<ReceiverMessage>,
         ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     ) -> Self {
@@ -125,12 +117,8 @@ impl<
 }
 
 impl ReceiverHdl {
-    pub fn new<
-        Req: for<'a> Deserialize<'a> + Send + 'static,
-        Rep: for<'a> Deserialize<'a> + Send + 'static,
-        Event: for<'a> Deserialize<'a> + Send + 'static,
-    >(
-        connection_handle: internal_hdl::InternalHdl<Req, Rep, Event>,
+    pub fn new<P: Parser>(
+        connection_handle: internal_hdl::InternalHdl<P>,
         ws_receiver: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(1);
@@ -151,6 +139,7 @@ mod tests {
     use crate::connection::internal_hdl;
     use crate::connection::internal_hdl::InternalMessage;
     use crate::connection::receiver::ReceiverHdl;
+    use crate::parser::StringParser;
     use crate::scheme::internal;
     use futures_util::{SinkExt, StreamExt};
     use std::time::Duration;
@@ -189,10 +178,7 @@ mod tests {
 
     async fn server(
         socket: TcpListener,
-    ) -> (
-        ReceiverHdl,
-        mpsc::Receiver<InternalMessage<String, String, String>>,
-    ) {
+    ) -> (ReceiverHdl, mpsc::Receiver<InternalMessage<StringParser>>) {
         let (internal_tx, internal_rx) = mpsc::channel(1);
 
         let internal_hdl = internal_hdl::InternalHdl::new(internal_tx);
@@ -215,7 +201,7 @@ mod tests {
     async fn try_message(
         message: internal::Message<String, String, String>,
         client_tx: mpsc::Sender<Option<String>>,
-        connection_rx: &mut mpsc::Receiver<InternalMessage<String, String, String>>,
+        connection_rx: &mut mpsc::Receiver<InternalMessage<StringParser>>,
     ) {
         client_tx
             .send(Some(serde_json::to_string(&message).unwrap()))

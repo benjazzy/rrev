@@ -1,4 +1,5 @@
 mod connection_hdl;
+mod event;
 mod internal_hdl;
 mod receiver;
 mod sender;
@@ -11,79 +12,56 @@ use std::ops::ControlFlow;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, warn};
 
-use crate::scheme;
 use crate::scheme::internal;
+use crate::{scheme, sender_manager};
 
 use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
+use crate::parser::Parser;
+pub use crate::request_error::RequestError;
 use crate::scheme::RequestHandle;
-pub use connection_hdl::{ConnectionHdl, RequestError};
+use crate::sender_manager::SenderManager;
+pub use connection_hdl::ConnectionHdl;
+pub use event::ConnectionEvent;
 use receiver::ReceiverHdl;
 pub use sender::SenderHdl;
 
 #[derive(Debug)]
-enum ConnectionMessage<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq,
-    TheirRep,
-    TheirEvent,
-> {
+enum ConnectionMessage<P: Parser> {
     Close,
     Request {
-        data: OurReq,
-        tx: oneshot::Sender<Result<TheirRep, RequestError>>,
+        data: P::OurRequest,
+        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     },
-    Event(OurEvent),
-    Send(internal::Message<OurReq, OurRep, OurEvent>),
-    RequestListener(mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>),
-    EventListener(mpsc::Sender<TheirEvent>),
+    Event(P::OurEvent),
+    Send(internal::Message<P::OurRequest, P::OurReply, P::OurEvent>),
 }
 
-struct Connection<
-    OurReq: Serialize,
-    OurRep: Serialize,
-    OurEvent: Serialize,
-    TheirReq: for<'a> Deserialize<'a>,
-    TheirRep: for<'a> Deserialize<'a>,
-    TheirEvent: for<'a> Deserialize<'a>,
-> {
-    next_id: usize,
-
+struct Connection<P: Parser> {
     receiver_hdl: ReceiverHdl,
-    sender_hdl: SenderHdl<OurReq, OurRep, OurEvent>,
+    sender_hdl: SenderHdl<P>,
 
-    internal_rx: mpsc::Receiver<InternalMessage<TheirReq, TheirRep, TheirEvent>>,
-    rx: mpsc::Receiver<ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>>,
+    internal_rx: mpsc::Receiver<InternalMessage<P>>,
+    rx: mpsc::Receiver<ConnectionMessage<P>>,
 
-    reply_map: HashMap<usize, oneshot::Sender<Result<TheirRep, RequestError>>>,
-    request_listeners: Vec<mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>>,
-    event_listeners: Vec<mpsc::Sender<TheirEvent>>,
+    next_id: usize,
+    reply_map: HashMap<usize, oneshot::Sender<Result<P::TheirReply, RequestError>>>,
+
+    event_tx: mpsc::Sender<ConnectionEvent<P>>,
 }
 
-impl<
-        OurReq: Serialize + Send + 'static,
-        OurRep: Serialize + Send + 'static,
-        OurEvent: Serialize + Send + 'static,
-        TheirReq: for<'a> Deserialize<'a> + Clone + Send + 'static,
-        TheirRep: for<'a> Deserialize<'a> + Clone + Send + 'static,
-        TheirEvent: for<'a> Deserialize<'a> + Clone + Send + 'static,
-    > Connection<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>
-{
+impl<P: Parser> Connection<P> {
     pub fn new(
-        rx: mpsc::Receiver<
-            ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
-        >,
+        rx: mpsc::Receiver<ConnectionMessage<P>>,
         stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+        event_tx: mpsc::Sender<ConnectionEvent<P>>,
     ) -> Self {
         let (internal_tx, internal_rx) = mpsc::channel(1);
-        let internal_hdl: InternalHdl<TheirReq, TheirRep, TheirEvent> =
-            InternalHdl::new(internal_tx);
+        let internal_hdl: InternalHdl<P> = InternalHdl::new(internal_tx);
         let (sender, receiver) = stream.split();
 
         let sender_hdl = SenderHdl::new(internal_hdl.clone(), sender);
@@ -99,8 +77,7 @@ impl<
             rx,
 
             reply_map: HashMap::new(),
-            request_listeners: vec![],
-            event_listeners: vec![],
+            event_tx,
         }
     }
 
@@ -123,13 +100,11 @@ impl<
 
         debug!("Connection closing.");
         self.close().await;
-        self.cancel_requests().await
+        self.cancel_requests().await;
+        self.event_tx.send(ConnectionEvent::Close).await;
     }
 
-    async fn handle_external(
-        &mut self,
-        message: ConnectionMessage<OurReq, OurRep, OurEvent, TheirReq, TheirRep, TheirEvent>,
-    ) -> ControlFlow<()> {
+    async fn handle_external(&mut self, message: ConnectionMessage<P>) -> ControlFlow<()> {
         match message {
             ConnectionMessage::Event(event) => {
                 self.sender_hdl.send(internal::Message::Event(event)).await;
@@ -143,21 +118,12 @@ impl<
             ConnectionMessage::Send(m) => {
                 self.sender_hdl.send(m).await;
             }
-            ConnectionMessage::RequestListener(request_listener) => {
-                self.external_new_request_handler(request_listener);
-            }
-            ConnectionMessage::EventListener(event_listener) => {
-                self.event_listeners.push(event_listener);
-            }
         }
 
         ControlFlow::Continue(())
     }
 
-    async fn handle_internal(
-        &mut self,
-        message: InternalMessage<TheirReq, TheirRep, TheirEvent>,
-    ) -> ControlFlow<()> {
+    async fn handle_internal(&mut self, message: InternalMessage<P>) -> ControlFlow<()> {
         match message {
             InternalMessage::Close => {
                 return ControlFlow::Break(());
@@ -170,17 +136,9 @@ impl<
         ControlFlow::Continue(())
     }
 
-    fn external_new_request_handler(
-        &mut self,
-        hdl: mpsc::Sender<RequestHandle<OurReq, OurRep, OurEvent, TheirReq>>,
-    ) {
-        println!("new request handler");
-        self.request_listeners.push(hdl);
-    }
-
     async fn handle_internal_new_message(
         &mut self,
-        message: internal::Message<TheirReq, TheirRep, TheirEvent>,
+        message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>,
     ) {
         match message {
             internal::Message::Request(request) => self.handle_internal_request(request).await,
@@ -191,15 +149,14 @@ impl<
         }
     }
 
-    async fn handle_internal_request(&mut self, request: internal::Request<TheirReq>) {
-        for request_listener in self.request_listeners.iter() {
-            let handle = RequestHandle::new(request.clone(), self.sender_hdl.clone());
-
-            request_listener.send(handle).await;
-        }
+    async fn handle_internal_request(&self, request: internal::Request<P::TheirRequest>) {
+        let handle = RequestHandle::new(request, self.sender_hdl.clone());
+        self.event_tx
+            .send(ConnectionEvent::RequestMessage(handle))
+            .await;
     }
 
-    async fn handle_internal_reply(&mut self, reply: internal::Reply<TheirRep>) {
+    async fn handle_internal_reply(&mut self, reply: internal::Reply<P::TheirReply>) {
         if let Some(tx) = self.reply_map.remove(&reply.id) {
             if let Err(_) = tx.send(Ok(reply.data)) {
                 warn!("Problem sending reply back to requester");
@@ -209,17 +166,16 @@ impl<
         };
     }
 
-    async fn handle_internal_event(&self, event: TheirEvent) {
-        for tx in self.event_listeners.iter() {
-            let event = event.clone();
-            let _ = tx.send(event).await;
-        }
+    async fn handle_internal_event(&self, event: P::TheirEvent) {
+        self.event_tx
+            .send(ConnectionEvent::EventMessage(event))
+            .await;
     }
 
     async fn send_request(
         &mut self,
-        data: OurReq,
-        tx: oneshot::Sender<Result<TheirRep, RequestError>>,
+        data: P::OurRequest,
+        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     ) {
         let id = self.next_id;
         self.next_id += 1;
@@ -229,7 +185,7 @@ impl<
         }
         self.reply_map.insert(id, tx);
 
-        let request = internal::Message::Request(internal::Request::<OurReq> { id, data });
+        let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data });
         self.sender_hdl.send(request).await;
     }
 
@@ -251,19 +207,21 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use crate::connection::connection_hdl::RequestError;
-    use crate::connection::ConnectionHdl;
+    use crate::connection::{ConnectionEvent, ConnectionHdl};
+    use crate::parser::StringParser;
+    use crate::request_error::RequestError;
     use crate::scheme::internal;
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};
     use std::collections::HashMap;
     use std::io::BufRead;
+    use std::sync::mpsc::Sender;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
     use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 
-    type ConHdlType = ConnectionHdl<String, String, String, String, String, String>;
+    type ConHdlType = ConnectionHdl<StringParser>;
 
     async fn client(addr: String) -> WebSocketStream<MaybeTlsStream<TcpStream>> {
         let url = url::Url::parse(format!("ws://{addr}").as_str()).expect("Error parsing url.");
@@ -360,7 +318,10 @@ mod tests {
         (socket, addr.to_string())
     }
 
-    async fn server(socket: TcpListener) -> ConHdlType {
+    async fn server(
+        socket: TcpListener,
+        tx: mpsc::Sender<ConnectionEvent<StringParser>>,
+    ) -> ConHdlType {
         let (stream, _) = socket.accept().await.expect("Error accepting connection.");
 
         let maybe_tls = MaybeTlsStream::Plain(stream);
@@ -369,7 +330,7 @@ mod tests {
             .await
             .expect("Error accepting websocket stream.");
 
-        let connection_hdl = ConHdlType::new(ws_stream).await;
+        let connection_hdl = ConHdlType::new(ws_stream, tx).await;
 
         connection_hdl
     }
@@ -383,9 +344,10 @@ mod tests {
         });
 
         let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (server_tx, mut server_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, Some(client_tx), None));
-        let connection_hdl = server(socket).await;
+        let connection_hdl = server(socket, server_tx).await;
 
         let timeout = connection_hdl
             .request_timeout(message.to_string(), Duration::from_millis(10))
@@ -424,7 +386,8 @@ mod tests {
 
         let (socket, addr) = socket().await;
         tokio::spawn(responsive_client(addr, requests));
-        let connection_hdl = server(socket).await;
+        let (server_tx, server_rx) = mpsc::channel(1);
+        let connection_hdl = server(socket, server_tx).await;
 
         let result = connection_hdl
             .request_timeout(message.to_string(), Duration::from_millis(100))
@@ -442,7 +405,8 @@ mod tests {
 
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, Some(client_tx), None));
-        let connection_hdl = server(socket).await;
+        let (server_tx, server_rx) = mpsc::channel(1);
+        let connection_hdl = server(socket, server_tx).await;
 
         connection_hdl.event(message.to_string()).await;
 
@@ -467,9 +431,9 @@ mod tests {
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, None, Some(client_rx)));
-        let connection_hdl = server(socket).await;
 
-        connection_hdl.register_event_listener(server_tx).await;
+        let connection_hdl = server(socket, server_tx).await;
+
         client_tx.send(event_str).await;
 
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
@@ -477,7 +441,11 @@ mod tests {
             .expect("Timeout getting message.")
             .expect("Empty message");
 
-        assert_eq!(server_message, message);
+        if let ConnectionEvent::EventMessage(m) = server_message {
+            assert_eq!(m, message);
+        } else {
+            panic!("Server did not receive an event.");
+        }
     }
 
     #[tokio::test]
@@ -500,9 +468,7 @@ mod tests {
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, Some(client_tx), Some(client_rx)));
-        let connection_hdl = server(socket).await;
-
-        connection_hdl.register_request_listener(server_tx).await;
+        let connection_hdl = server(socket, server_tx).await;
 
         // Send our request to the server connection.
         our_client_tx
@@ -516,7 +482,11 @@ mod tests {
             .expect("Timeout getting message.")
             .expect("Empty message.");
 
-        server_message.complete(message.to_string()).await;
+        if let ConnectionEvent::RequestMessage(r) = server_message {
+            r.complete(message.to_string()).await;
+        } else {
+            panic!("Server got incorrect message type.");
+        }
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), our_client_rx.recv())
             .await
@@ -532,7 +502,8 @@ mod tests {
 
         let (socket, addr) = socket().await;
         tokio::spawn(close_client(addr));
-        let connection_hdl = server(socket).await;
+        let (tx, _rx) = mpsc::channel(1);
+        let connection_hdl = server(socket, tx).await;
 
         let close = connection_hdl
             .request_timeout(message.to_string(), Duration::from_millis(100))
