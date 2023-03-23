@@ -29,6 +29,6 @@ impl<'a, P: Parser> RequestHandle<P> {
             id: self.request.id,
             data: reply,
         });
-        self.sender_hdl.send(message).await
+        self.sender_hdl.send(message).await;
     }
 }

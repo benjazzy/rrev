@@ -5,6 +5,7 @@ extern crate core;
 
 pub mod client;
 mod connection;
+pub mod error;
 pub mod parser;
 mod request_error;
 mod scheme;
