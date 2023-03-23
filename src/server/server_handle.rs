@@ -1,5 +1,6 @@
 use crate::connection::{ConnectionEvent, ConnectionHdl, SenderHdl};
 use crate::parser::Parser;
+use crate::request_error::RequestError;
 use crate::scheme::RequestHandle;
 use crate::server::server_event::ServerEvent;
 use crate::server::server_handle::ServerMessage::SendRequest;
@@ -8,7 +9,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
-use crate::request_error::RequestError;
 
 /// Messages that can be passed to the server.
 /// They can by passed in by any server handler.

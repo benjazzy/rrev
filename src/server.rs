@@ -9,19 +9,19 @@ mod upgrader;
 use crate::connection;
 use crate::connection::ConnectionHdl;
 use crate::parser::Parser;
+use crate::request_error::RequestError;
 use crate::server::acceptor::AcceptorHandle;
 use crate::server::server_handle::AcceptorsServerHandle;
 pub use error::Error;
 pub use listener::ListenerHandle;
+pub use server_event::{ConnectionEvent, ConnectionRequest, ServerEvent};
 pub use server_handle::ServerHandle;
-pub use server_event::{ ServerEvent, ConnectionRequest, ConnectionEvent };
 use server_handle::ServerMessage;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, warn};
-use crate::request_error::RequestError;
 
 #[derive(Debug)]
 struct Server<P: Parser> {
@@ -72,7 +72,7 @@ impl<P: Parser> Server<P> {
 
     async fn handle_message(&mut self, message: ServerMessage<P>) {
         match message {
-            ServerMessage::Close => {}, // Close is handled in run().
+            ServerMessage::Close => {} // Close is handled in run().
             ServerMessage::GetListenAddress(tx) => self.get_listen_address(tx).await,
             ServerMessage::SendRequest { to, tx, request } => {
                 self.send_request(to, request, tx).await;
@@ -142,7 +142,12 @@ impl<P: Parser> Server<P> {
         self.tx.send(server_event).await;
     }
 
-    async fn send_request(&self, to: SocketAddr, request: P::OurRequest, tx: oneshot::Sender<Result<P::TheirReply, RequestError>>) {
+    async fn send_request(
+        &self,
+        to: SocketAddr,
+        request: P::OurRequest,
+        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
+    ) {
         if let Some(connection_hdl) = self.connections.get(&to) {
             connection_hdl.request_with_sender(request, tx).await;
         } else {

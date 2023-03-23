@@ -8,9 +8,13 @@ async fn main() {
     tracing_subscriber::fmt::init();
     let address = "127.0.0.1:8080";
     let (tx, mut rx) = mpsc::channel(1);
-    let server_hdl = ServerHandle::<StringParser>::new(address.to_string(), tx).await
+    let server_hdl = ServerHandle::<StringParser>::new(address.to_string(), tx)
+        .await
         .expect("Could not start server.");
-    let listen_addr = server_hdl.get_listen_address().await.expect("Problem getting listen address.");
+    let listen_addr = server_hdl
+        .get_listen_address()
+        .await
+        .expect("Problem getting listen address.");
 
     info!("Echo server listening on address {listen_addr}");
 
@@ -22,8 +26,15 @@ async fn main() {
                     info!("Connection {addr} closed.");
                 }
                 ServerEvent::ConnectionRequest(request) => {
-                    info!("Got request {} from {}.", request.request.get_request(), request.from);
-                    request.request.complete(request.request.get_request().clone()).await;
+                    info!(
+                        "Got request {} from {}.",
+                        request.request.get_request(),
+                        request.from
+                    );
+                    request
+                        .request
+                        .complete(request.request.get_request().clone())
+                        .await;
                 }
                 ServerEvent::ConnectionEvent(event) => {
                     info!("Got event {} from {}.", event.event, event.from);

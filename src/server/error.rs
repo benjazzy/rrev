@@ -39,7 +39,7 @@ impl Display for RequestError {
             RequestError::Recv(e) => "The request failed to get a reply {e}",
             RequestError::Closed => {
                 "The connection was closed before the request could be completed."
-            },
+            }
             RequestError::ConnectionNotFound => "The requested connection was not found.",
         };
         write!(f, "{message}")
