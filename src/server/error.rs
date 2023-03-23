@@ -1,57 +1,42 @@
-use std::fmt::{Display, Formatter};
-use tokio::sync::oneshot;
+use std::fmt::Formatter;
 
 #[derive(Debug)]
-pub enum Error {
-    /// Used when getting the listen address of the Listener socket if
-    /// the socket is not listening.
+pub enum ListenAddrError {
     Io(tokio::io::Error),
-
-    /// Problem receiving the reply from Listener.
-    RecvError,
-
-    /// Problem sending message to the Listener.
     SendError,
+    RecvError,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum RequestError {
-    Timeout,
-    Recv(oneshot::error::RecvError),
-    Closed,
-    ConnectionNotFound,
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum ClientsError {
+    SendError,
+    RecvError,
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::Io(e) => write!(f, "Io Error: {e}"),
-            Error::RecvError => write!(f, "There was a problem receiving."),
-            Error::SendError => write!(f, "There was a problem sending.",),
-        }
-    }
-}
-
-impl Display for RequestError {
+impl std::fmt::Display for ListenAddrError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            RequestError::Timeout => "The request did not get a reply before the timeout.",
-            RequestError::Recv(e) => "The request failed to get a reply {e}",
-            RequestError::Closed => {
-                "The connection was closed before the request could be completed."
+            ListenAddrError::Io(e) => "Io error getting listen address: {e}",
+            ListenAddrError::SendError => "There was a problem sending the message.",
+            ListenAddrError::RecvError => {
+                "There was a problem receiving the address from the server."
             }
-            RequestError::ConnectionNotFound => "The requested connection was not found.",
         };
+
         write!(f, "{message}")
     }
 }
 
-impl From<crate::connection::RequestError> for RequestError {
-    fn from(value: crate::connection::RequestError) -> Self {
-        match value {
-            crate::connection::RequestError::Timeout => RequestError::Timeout,
-            crate::connection::RequestError::Recv(e) => RequestError::Recv(e),
-            crate::connection::RequestError::Closed => RequestError::Closed,
-        }
+impl std::fmt::Display for ClientsError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            ClientsError::SendError => "Problem sending get clients message to the server.",
+            ClientsError::RecvError => "Problem receiving the reply from the server.",
+        };
+
+        write!(f, "{message}")
     }
 }
+
+impl std::error::Error for ListenAddrError {}
+impl std::error::Error for ClientsError {}

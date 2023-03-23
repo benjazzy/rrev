@@ -4,15 +4,14 @@ mod error;
 mod listener;
 mod server_event;
 mod server_handle;
-mod upgrader;
 
 use crate::connection;
 use crate::connection::ConnectionHdl;
+use crate::error::RequestError;
 use crate::parser::Parser;
-use crate::request_error::RequestError;
 use crate::server::acceptor::AcceptorHandle;
+use crate::server::error::{ClientsError, ListenAddrError};
 use crate::server::server_handle::AcceptorsServerHandle;
-pub use error::Error;
 pub use listener::ListenerHandle;
 pub use server_event::{ConnectionEvent, ConnectionRequest, ServerEvent};
 pub use server_handle::ServerHandle;
@@ -90,14 +89,14 @@ impl<P: Parser> Server<P> {
         };
     }
 
-    async fn get_listen_address(&self, tx: oneshot::Sender<Result<SocketAddr, Error>>) {
+    async fn get_listen_address(&self, tx: oneshot::Sender<Result<SocketAddr, ListenAddrError>>) {
         let try_addr = self.listener_hdl.get_addr().await;
         if let Err(_) = tx.send(try_addr) {
             warn!("Problem sending listen address back to requester.");
         };
     }
 
-    async fn get_clients(&self, tx: oneshot::Sender<Result<Vec<SocketAddr>, Error>>) {
+    async fn get_clients(&self, tx: oneshot::Sender<Result<Vec<SocketAddr>, ClientsError>>) {
         let clients = dbg!(self
             .connections
             .keys()
@@ -220,10 +219,10 @@ mod tests {
         let (client_tx, _client_rx) = mpsc::channel(1);
         let _client_hdl = connect::<StringParser>(url, client_tx).await;
 
-        let server_message =
-            tokio::time::timeout(Duration::from_millis(100), server_rx.recv()).await
-                .expect("Timeout getting server message.")
-                .expect("Problem getting server message.");
+        let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
+            .await
+            .expect("Timeout getting server message.")
+            .expect("Problem getting server message.");
 
         let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
             addr
@@ -277,10 +276,10 @@ mod tests {
         assert_eq!(first.ip().to_string(), ip.to_string());
 
         // Check that we receive a new connection event from the server.
-        let server_message =
-            tokio::time::timeout(Duration::from_millis(100), server_rx.recv()).await
-                .expect("Timeout getting server message.")
-                .expect("Problem getting server message.");
+        let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
+            .await
+            .expect("Timeout getting server message.")
+            .expect("Problem getting server message.");
 
         let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
             addr

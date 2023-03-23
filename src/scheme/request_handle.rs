@@ -3,6 +3,7 @@ use serde::Serialize;
 use tokio::sync::oneshot;
 
 use crate::connection::SenderHdl;
+use crate::error::SendError;
 use crate::parser::Parser;
 use crate::scheme::internal;
 
@@ -24,11 +25,11 @@ impl<'a, P: Parser> RequestHandle<P> {
         &self.request.data
     }
 
-    pub async fn complete(&self, reply: P::OurReply) {
+    pub async fn complete(&self, reply: P::OurReply) -> Result<(), SendError> {
         let message = internal::Message::Reply(internal::Reply {
             id: self.request.id,
             data: reply,
         });
-        self.sender_hdl.send(message).await
+        self.sender_hdl.send(message).await.map_err(|_| SendError)
     }
 }

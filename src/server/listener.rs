@@ -9,7 +9,6 @@ use tracing::{debug, error, warn};
 
 use crate::sender_manager::SenderManager;
 use crate::server::acceptor::ListenersAcceptorHandle;
-use crate::server::Error;
 pub use listener_handle::ListenerHandle;
 use listener_handle::ListenerMessage;
 

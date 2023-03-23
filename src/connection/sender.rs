@@ -1,3 +1,4 @@
+use crate::error::SendError;
 use crate::parser::Parser;
 use crate::scheme::internal;
 use futures_util::stream::SplitSink;
@@ -96,12 +97,21 @@ impl<P: Parser> SenderHdl<P> {
         Self { tx }
     }
 
-    pub async fn close(&self) {
-        let _ = self.tx.send(SenderMessage::Close).await;
+    pub async fn close(&self) -> Result<(), SendError> {
+        self.tx
+            .send(SenderMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 
-    pub async fn send(&self, message: internal::Message<P::OurRequest, P::OurReply, P::OurEvent>) {
-        let _ = self.tx.send(SenderMessage::Message(message)).await;
+    pub async fn send(
+        &self,
+        message: internal::Message<P::OurRequest, P::OurReply, P::OurEvent>,
+    ) -> Result<(), SendError> {
+        self.tx
+            .send(SenderMessage::Message(message))
+            .await
+            .map_err(|_| SendError)
     }
 }
 

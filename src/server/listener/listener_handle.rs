@@ -1,11 +1,11 @@
-use crate::server::acceptor::ListenersAcceptorHandle;
+use crate::error::SendError;
+use crate::server::{acceptor::ListenersAcceptorHandle, error::ListenAddrError};
 use std::net::SocketAddr;
 use tokio::io;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 use super::Listener;
-use crate::server::Error;
 
 /// Messages that can be sent from a ListenerHandle to a Listener.
 /// If the message requires a reply then use a oneshot.
@@ -58,8 +58,11 @@ impl ListenerHandle {
         Ok(ListenerHandle { tx })
     }
 
-    pub async fn close(&self) {
-        self.tx.send(ListenerMessage::Close).await;
+    pub async fn close(&self) -> Result<(), SendError> {
+        self.tx
+            .send(ListenerMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 
     /// Gets the address of the running Listener.
@@ -69,14 +72,14 @@ impl ListenerHandle {
     /// from the Listener then return [Error::RecvError].
     /// If the listener had a problem getting the listen
     /// address then return [Error::Io] with the io error attached.
-    pub async fn get_addr(&self) -> Result<SocketAddr, Error> {
+    pub async fn get_addr(&self) -> Result<SocketAddr, ListenAddrError> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(ListenerMessage::GetAddress(tx))
             .await
-            .map_err(|_| Error::SendError)?;
-        let addr = rx.await.map_err(|_| Error::RecvError)?;
+            .map_err(|_| ListenAddrError::SendError)?;
+        let addr = rx.await.map_err(|_| ListenAddrError::RecvError)?;
 
-        return addr.map_err(|e| Error::Io(e));
+        return addr.map_err(|e| ListenAddrError::Io(e));
     }
 }
