@@ -7,13 +7,14 @@ mod server_handle;
 mod upgrader;
 
 use crate::connection;
-use crate::connection::{ConnectionEvent, ConnectionHdl};
+use crate::connection::ConnectionHdl;
 use crate::parser::Parser;
 use crate::server::acceptor::AcceptorHandle;
-use crate::server::server_event::ServerEvent;
 use crate::server::server_handle::AcceptorsServerHandle;
 pub use error::Error;
 pub use listener::ListenerHandle;
+pub use server_handle::ServerHandle;
+pub use server_event::{ ServerEvent, ConnectionRequest, ConnectionEvent };
 use server_handle::ServerMessage;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -115,22 +116,22 @@ impl<P: Parser> Server<P> {
         self.connections.insert(addr, connection);
     }
 
-    async fn connection_event(&mut self, event: ConnectionEvent<P>, addr: SocketAddr) {
+    async fn connection_event(&mut self, event: connection::ConnectionEvent<P>, addr: SocketAddr) {
         let server_event = match event {
-            ConnectionEvent::Close => {
+            connection::ConnectionEvent::Close => {
                 if let None = self.connections.remove(&addr) {
                     warn!("Connection closed that was not in out list of connections.");
                 }
 
                 ServerEvent::ConnectionClose(addr)
             }
-            ConnectionEvent::EventMessage(e) => {
+            connection::ConnectionEvent::EventMessage(e) => {
                 ServerEvent::ConnectionEvent(server_event::ConnectionEvent {
                     from: addr,
                     event: e,
                 })
             }
-            ConnectionEvent::RequestMessage(r) => {
+            connection::ConnectionEvent::RequestMessage(r) => {
                 ServerEvent::ConnectionRequest(server_event::ConnectionRequest {
                     from: addr,
                     request: r,
