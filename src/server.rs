@@ -9,10 +9,9 @@ mod upgrader;
 use crate::connection;
 use crate::connection::ConnectionHdl;
 use crate::parser::Parser;
-use crate::request_error::RequestError;
+use crate::error::RequestError;
 use crate::server::acceptor::AcceptorHandle;
 use crate::server::server_handle::AcceptorsServerHandle;
-pub use error::Error;
 pub use listener::ListenerHandle;
 pub use server_event::{ConnectionEvent, ConnectionRequest, ServerEvent};
 pub use server_handle::ServerHandle;
@@ -22,6 +21,7 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, warn};
+use crate::server::error::{ClientsError, ListenAddrError};
 
 #[derive(Debug)]
 struct Server<P: Parser> {
@@ -90,14 +90,14 @@ impl<P: Parser> Server<P> {
         };
     }
 
-    async fn get_listen_address(&self, tx: oneshot::Sender<Result<SocketAddr, Error>>) {
+    async fn get_listen_address(&self, tx: oneshot::Sender<Result<SocketAddr, ListenAddrError>>) {
         let try_addr = self.listener_hdl.get_addr().await;
         if let Err(_) = tx.send(try_addr) {
             warn!("Problem sending listen address back to requester.");
         };
     }
 
-    async fn get_clients(&self, tx: oneshot::Sender<Result<Vec<SocketAddr>, Error>>) {
+    async fn get_clients(&self, tx: oneshot::Sender<Result<Vec<SocketAddr>, ClientsError>>) {
         let clients = dbg!(self
             .connections
             .keys()

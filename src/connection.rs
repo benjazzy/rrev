@@ -22,7 +22,7 @@ use crate::{scheme, sender_manager};
 
 use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
 use crate::parser::Parser;
-pub use crate::request_error::RequestError;
+pub use crate::error::RequestError;
 use crate::scheme::RequestHandle;
 use crate::sender_manager::SenderManager;
 pub use connection_hdl::ConnectionHdl;
@@ -194,7 +194,7 @@ impl<P: Parser> Connection<P> {
 
         for key in keys.iter() {
             if let Some(tx) = self.reply_map.remove(key) {
-                let _ = tx.send(Err(RequestError::Closed));
+                let _ = tx.send(Err(RequestError::Canceled));
             }
         }
     }
@@ -209,7 +209,7 @@ impl<P: Parser> Connection<P> {
 mod tests {
     use crate::connection::{ConnectionEvent, ConnectionHdl};
     use crate::parser::StringParser;
-    use crate::request_error::RequestError;
+    use crate::error::{RequestError, TimeoutError};
     use crate::scheme::internal;
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};
@@ -354,7 +354,7 @@ mod tests {
             .await;
 
         // Assert that the request timed out.
-        assert_eq!(Err(RequestError::Timeout), timeout);
+        assert_eq!(Err(TimeoutError::Timeout), timeout);
 
         // Assert the the Connection did send the message.
         assert_eq!(
@@ -510,6 +510,6 @@ mod tests {
             .await;
 
         // Assert that the request failed because of a close.
-        assert_eq!(Err(RequestError::Closed), close);
+        assert_eq!(Err(TimeoutError::RequestError(RequestError::Canceled)), close);
     }
 }

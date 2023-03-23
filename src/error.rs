@@ -1,4 +1,4 @@
-use std::fmt::{Formatter, write};
+use std::fmt::Formatter;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct SendError;

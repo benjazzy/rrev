@@ -42,6 +42,7 @@ async fn main() {
                 ServerEvent::ConnectionEvent(event) => {
                     info!("Got event {} from {}.", event.event, event.from);
                     server_hdl.event(event.from, event.event.clone()).await
+                        .expect("Problem sending server event");
                 }
             }
         } else {

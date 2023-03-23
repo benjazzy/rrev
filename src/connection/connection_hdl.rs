@@ -1,6 +1,6 @@
 use crate::connection::ConnectionEvent;
 use crate::parser::Parser;
-use crate::request_error::RequestError;
+use crate::error::{RequestError, TimeoutError};
 use crate::scheme::RequestHandle;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use crate::error::SendError;
 
 use super::{Connection, ConnectionMessage};
 
@@ -30,28 +31,29 @@ impl<P: Parser> ConnectionHdl<P> {
         ConnectionHdl { tx }
     }
 
-    pub async fn close(&self) {
-        self.tx.send(ConnectionMessage::Close).await;
+    pub async fn close(&self) -> Result<(), SendError> {
+        self.tx.send(ConnectionMessage::Close).await.map_err(|_| SendError)
     }
 
     pub async fn request_with_sender(
         &self,
         request: P::OurRequest,
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
-    ) {
-        let _ = self
+    ) -> Result<(), RequestError> {
+        self
             .tx
             .send(ConnectionMessage::Request { data: request, tx })
-            .await;
+            .await
+            .map_err(|_| RequestError::SendError)
     }
 
     pub async fn request(&self, request: P::OurRequest) -> Result<P::TheirReply, RequestError> {
         let (tx, rx) = oneshot::channel();
-        self.request_with_sender(request, tx).await;
+        self.request_with_sender(request, tx).await?;
 
         match rx.await {
             Ok(r) => r,
-            Err(e) => Err(RequestError::Recv(e)),
+            Err(e) => Err(RequestError::RecvError),
         }
     }
 
@@ -59,10 +61,10 @@ impl<P: Parser> ConnectionHdl<P> {
         &self,
         request: P::OurRequest,
         timeout: Duration,
-    ) -> Result<P::TheirReply, RequestError> {
+    ) -> Result<P::TheirReply, TimeoutError> {
         match tokio::time::timeout(timeout, self.request(request)).await {
-            Ok(result) => result,
-            Err(_) => return Err(RequestError::Timeout),
+            Ok(result) => result.map_err(|e| TimeoutError::RequestError(e)),
+            Err(_) => return Err(TimeoutError::Timeout),
         }
     }
 
