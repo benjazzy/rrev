@@ -1,4 +1,4 @@
-use crate::connection::{ConnectionEvent, ConnectionHdl};
+pub use crate::connection::{ConnectionEvent, ConnectionHdl};
 use crate::parser::Parser;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
