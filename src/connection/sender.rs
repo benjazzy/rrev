@@ -3,16 +3,14 @@ use crate::parser::Parser;
 use crate::scheme::internal;
 use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
-use serde::{Deserialize, Serialize};
 use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use tracing::error;
+use tracing::{error, warn};
 
 use super::internal_hdl;
-use crate::scheme::internal::Request;
 
 pub enum SenderMessage<P: Parser> {
     Message(internal::Message<P::OurRequest, P::OurReply, P::OurEvent>),
@@ -79,6 +77,18 @@ impl<P: Parser> Sender<P> {
         };
 
         if let Err(e) = self.ws_sender.send(Message::Text(message_str)).await {
+            use tokio_tungstenite::tungstenite::error::Error;
+            match e {
+                Error::ConnectionClosed => {
+                    warn!("Could not send websocket message because connection is already closed.");
+                    self.connection_hdl.close().await
+                }
+                Error::Protocol(_) | Error::Utf8 => {
+                    error!("Unrecoverable websocket error. Closing.");
+                    self.connection_hdl.close().await;
+                }
+                _ => {}
+            }
             error!("Problem sending websocket message. {e}");
         }
     }
@@ -148,7 +158,9 @@ mod tests {
         while let Some(message) = read.next().await {
             match message {
                 Ok(m) => {
-                    tx.send(m.to_string()).await;
+                    tx.send(m.to_string())
+                        .await
+                        .expect("Problem sending message to test");
                 }
                 Err(_) => break,
             }
@@ -181,9 +193,7 @@ mod tests {
 
         let (write, _) = ws_stream.split();
 
-        let sender_hdl = SenderHdl::new(internal_hdl, write);
-
-        sender_hdl
+        SenderHdl::new(internal_hdl, write)
     }
 
     #[tokio::test]
@@ -199,7 +209,10 @@ mod tests {
         tokio::spawn(client(addr, client_tx));
         let sender_hdl = server(socket).await;
 
-        sender_hdl.send(request.clone()).await;
+        sender_hdl
+            .send(request.clone())
+            .await
+            .expect("Problem sending message");
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
             .await

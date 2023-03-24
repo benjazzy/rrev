@@ -4,27 +4,20 @@ mod internal_hdl;
 mod receiver;
 mod sender;
 
-use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ops::ControlFlow;
-use std::sync::mpsc::Receiver;
-use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{debug, warn};
 
 use crate::scheme::internal;
-use crate::{scheme, sender_manager};
 
 use crate::connection::internal_hdl::{InternalHdl, InternalMessage};
 pub use crate::error::RequestError;
 use crate::parser::Parser;
 use crate::scheme::RequestHandle;
-use crate::sender_manager::SenderManager;
 pub use connection_hdl::ConnectionHdl;
 pub use event::ConnectionEvent;
 use receiver::ReceiverHdl;
@@ -38,7 +31,6 @@ enum ConnectionMessage<P: Parser> {
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     },
     Event(P::OurEvent),
-    Send(internal::Message<P::OurRequest, P::OurReply, P::OurEvent>),
 }
 
 struct Connection<P: Parser> {
@@ -65,7 +57,7 @@ impl<P: Parser> Connection<P> {
         let (sender, receiver) = stream.split();
 
         let sender_hdl = SenderHdl::new(internal_hdl.clone(), sender);
-        let receiver_hdl = ReceiverHdl::new(internal_hdl.clone(), receiver);
+        let receiver_hdl = ReceiverHdl::new(internal_hdl, receiver);
 
         Connection {
             next_id: 0,
@@ -101,96 +93,118 @@ impl<P: Parser> Connection<P> {
         debug!("Connection closing.");
         self.close().await;
         self.cancel_requests().await;
-        self.event_tx.send(ConnectionEvent::Close).await;
+        if self.event_tx.send(ConnectionEvent::Close).await.is_err() {
+            warn!("Could not notify of connection close.");
+        }
     }
 
     async fn handle_external(&mut self, message: ConnectionMessage<P>) -> ControlFlow<()> {
         match message {
             ConnectionMessage::Event(event) => {
-                self.sender_hdl.send(internal::Message::Event(event)).await;
-            }
-            ConnectionMessage::Request { data, tx } => {
-                self.send_request(data, tx).await;
-            }
-            ConnectionMessage::Close => {
-                return ControlFlow::Break(());
-            }
-            ConnectionMessage::Send(m) => {
-                self.sender_hdl.send(m).await;
-            }
-        }
+                if self
+                    .sender_hdl
+                    .send(internal::Message::Event(event))
+                    .await
+                    .is_ok()
+                {
+                    ControlFlow::Continue(())
+                } else {
+                    warn!("Problem sending websocket message. Exiting.");
 
-        ControlFlow::Continue(())
+                    ControlFlow::Break(())
+                }
+            }
+            ConnectionMessage::Request { data, tx } => self.send_request(data, tx).await,
+            ConnectionMessage::Close => ControlFlow::Break(()),
+        }
     }
 
     async fn handle_internal(&mut self, message: InternalMessage<P>) -> ControlFlow<()> {
         match message {
-            InternalMessage::Close => {
-                return ControlFlow::Break(());
-            }
-            InternalMessage::NewMessage(message) => {
-                self.handle_internal_new_message(message).await;
-            }
+            InternalMessage::Close => ControlFlow::Break(()),
+            InternalMessage::NewMessage(message) => self.handle_internal_new_message(message).await,
         }
-
-        ControlFlow::Continue(())
     }
 
     async fn handle_internal_new_message(
         &mut self,
         message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>,
-    ) {
+    ) -> ControlFlow<()> {
         match message {
             internal::Message::Request(request) => self.handle_internal_request(request).await,
-            internal::Message::Reply(reply) => self.handle_internal_reply(reply).await,
-            internal::Message::Event(event) => {
-                self.handle_internal_event(event).await;
+            internal::Message::Reply(reply) => {
+                self.handle_internal_reply(reply).await;
+
+                ControlFlow::Continue(())
             }
+            internal::Message::Event(event) => self.handle_internal_event(event).await,
         }
     }
 
-    async fn handle_internal_request(&self, request: internal::Request<P::TheirRequest>) {
+    async fn handle_internal_request(
+        &self,
+        request: internal::Request<P::TheirRequest>,
+    ) -> ControlFlow<()> {
         let handle = RequestHandle::new(request, self.sender_hdl.clone());
-        self.event_tx
+        if self
+            .event_tx
             .send(ConnectionEvent::RequestMessage(handle))
-            .await;
+            .await
+            .is_err()
+        {
+            warn!("Problem sending request event. Exiting.");
+            return ControlFlow::Break(());
+        }
+
+        ControlFlow::Continue(())
     }
 
     async fn handle_internal_reply(&mut self, reply: internal::Reply<P::TheirReply>) {
         if let Some(tx) = self.reply_map.remove(&reply.id) {
-            if let Err(_) = tx.send(Ok(reply.data)) {
+            if tx.send(Ok(reply.data)).is_err() {
                 warn!("Problem sending reply back to requester");
-            };
+            }
         } else {
             warn!("No request id matches reply id.");
         };
     }
 
-    async fn handle_internal_event(&self, event: P::TheirEvent) {
-        self.event_tx
+    async fn handle_internal_event(&self, event: P::TheirEvent) -> ControlFlow<()> {
+        if self
+            .event_tx
             .send(ConnectionEvent::EventMessage(event))
-            .await;
+            .await
+            .is_err()
+        {
+            return ControlFlow::Break(());
+        }
+
+        ControlFlow::Continue(())
     }
 
     async fn send_request(
         &mut self,
         data: P::OurRequest,
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
-    ) {
+    ) -> ControlFlow<()> {
         let id = self.next_id;
         self.next_id += 1;
         if self.reply_map.contains_key(&id) {
             warn!("Failed to send request. Request id has already been used.");
-            return;
+            return ControlFlow::Continue(());
         }
         self.reply_map.insert(id, tx);
 
         let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data });
-        self.sender_hdl.send(request).await;
+        if self.sender_hdl.send(request).await.is_err() {
+            return ControlFlow::Break(());
+        }
+
+        ControlFlow::Continue(())
     }
 
     async fn cancel_requests(&mut self) {
-        let keys: Vec<usize> = self.reply_map.iter().map(|(key, _)| *key).collect();
+        let keys: Vec<usize> = self.reply_map.keys().copied().collect();
 
         for key in keys.iter() {
             if let Some(tx) = self.reply_map.remove(key) {
@@ -200,8 +214,8 @@ impl<P: Parser> Connection<P> {
     }
 
     async fn close(&mut self) {
-        self.receiver_hdl.close().await;
-        self.sender_hdl.close().await;
+        let _ = self.receiver_hdl.close().await;
+        let _ = self.sender_hdl.close().await;
     }
 }
 
@@ -214,8 +228,6 @@ mod tests {
     use futures_util::stream::{SplitSink, SplitStream};
     use futures_util::{SinkExt, StreamExt};
     use std::collections::HashMap;
-    use std::io::BufRead;
-    use std::sync::mpsc::Sender;
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
@@ -237,7 +249,7 @@ mod tests {
         let ws_stream = client(addr).await;
 
         let (mut write, mut read) = ws_stream.split();
-        if let Some(message) = read.next().await {
+        if let Some(_message) = read.next().await {
             write.close().await.expect("Problem closing connection");
         }
     }
@@ -249,7 +261,9 @@ mod tests {
         while let Some(message) = read.next().await {
             match message {
                 Ok(m) => {
-                    tx.send(m.to_string()).await;
+                    tx.send(m.to_string())
+                        .await
+                        .expect("Problem sending message back.");
                 }
                 Err(_) => break,
             }
@@ -271,11 +285,11 @@ mod tests {
     async fn send_client(
         addr: String,
         tx: Option<mpsc::Sender<String>>,
-        mut rx: Option<mpsc::Receiver<String>>,
+        rx: Option<mpsc::Receiver<String>>,
     ) {
         let ws_stream = client(addr).await;
 
-        let (mut write, mut read) = ws_stream.split();
+        let (write, read) = ws_stream.split();
 
         if let Some(tx) = tx {
             tokio::spawn(send_back(tx, read));
@@ -291,18 +305,15 @@ mod tests {
         let (mut send, mut read) = ws_stream.split();
 
         while let Some(message) = read.next().await {
-            match message {
-                Ok(m) => {
-                    assert!(m.is_text());
-                    let m_str = m.to_text().unwrap();
-                    assert!(responses.contains_key(m_str));
-                    send.send(tungstenite::Message::Text(
-                        responses.get(m_str).unwrap().clone(),
-                    ))
-                    .await
-                    .unwrap();
-                }
-                Err(e) => {}
+            if let Ok(m) = message {
+                assert!(m.is_text());
+                let m_str = m.to_text().unwrap();
+                assert!(responses.contains_key(m_str));
+                send.send(tungstenite::Message::Text(
+                    responses.get(m_str).unwrap().clone(),
+                ))
+                .await
+                .unwrap();
             }
         }
     }
@@ -330,9 +341,7 @@ mod tests {
             .await
             .expect("Error accepting websocket stream.");
 
-        let connection_hdl = ConHdlType::new(ws_stream, tx).await;
-
-        connection_hdl
+        ConHdlType::new(ws_stream, tx).await
     }
 
     #[tokio::test]
@@ -344,7 +353,7 @@ mod tests {
         });
 
         let (client_tx, mut client_rx) = mpsc::channel(1);
-        let (server_tx, mut server_rx) = mpsc::channel(1);
+        let (server_tx, _server_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, Some(client_tx), None));
         let connection_hdl = server(socket, server_tx).await;
@@ -386,7 +395,7 @@ mod tests {
 
         let (socket, addr) = socket().await;
         tokio::spawn(responsive_client(addr, requests));
-        let (server_tx, server_rx) = mpsc::channel(1);
+        let (server_tx, _server_rx) = mpsc::channel(1);
         let connection_hdl = server(socket, server_tx).await;
 
         let result = connection_hdl
@@ -405,10 +414,13 @@ mod tests {
 
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, Some(client_tx), None));
-        let (server_tx, server_rx) = mpsc::channel(1);
+        let (server_tx, _server_rx) = mpsc::channel(1);
         let connection_hdl = server(socket, server_tx).await;
 
-        connection_hdl.event(message.to_string()).await;
+        connection_hdl
+            .event(message.to_string())
+            .await
+            .expect("Problem sending event.");
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
             .await
@@ -427,14 +439,17 @@ mod tests {
         let event = internal::Message::<String, String, String>::Event(message.to_string());
         let event_str = serde_json::to_string(&event).expect("Problem serializing event.");
 
-        let (client_tx, mut client_rx) = mpsc::channel(1);
+        let (client_tx, client_rx) = mpsc::channel(1);
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, None, Some(client_rx)));
 
-        let connection_hdl = server(socket, server_tx).await;
+        let _connection_hdl = server(socket, server_tx).await;
 
-        client_tx.send(event_str).await;
+        client_tx
+            .send(event_str)
+            .await
+            .expect("Problem sending event.");
 
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
@@ -463,12 +478,12 @@ mod tests {
         });
         let reply_str = serde_json::to_string(&reply).expect("Problem serializing reply.");
 
-        let (our_client_tx, mut client_rx) = mpsc::channel(1);
+        let (our_client_tx, client_rx) = mpsc::channel(1);
         let (client_tx, mut our_client_rx) = mpsc::channel(1);
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let (socket, addr) = socket().await;
         tokio::spawn(send_client(addr, Some(client_tx), Some(client_rx)));
-        let connection_hdl = server(socket, server_tx).await;
+        let _connection_hdl = server(socket, server_tx).await;
 
         // Send our request to the server connection.
         our_client_tx
@@ -483,7 +498,9 @@ mod tests {
             .expect("Empty message.");
 
         if let ConnectionEvent::RequestMessage(r) = server_message {
-            r.complete(message.to_string()).await;
+            r.complete(message.to_string())
+                .await
+                .expect("Problem completing request.");
         } else {
             panic!("Server got incorrect message type.");
         }

@@ -1,7 +1,6 @@
 pub use crate::connection::{ConnectionEvent, ConnectionHdl};
 use crate::parser::Parser;
-use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite;
 use url::Url;
 
@@ -21,12 +20,11 @@ mod tests {
     use crate::connection;
     use crate::connection::ConnectionEvent;
     use crate::parser::StringParser;
-    use std::assert_matches::assert_matches;
     use std::ops::ControlFlow;
     use std::time::Duration;
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::{broadcast, mpsc};
-    use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+    use tokio::net::TcpListener;
+    use tokio::sync::mpsc;
+    use tokio_tungstenite::MaybeTlsStream;
     use url::Url;
 
     type ConnectionHdl = connection::ConnectionHdl<StringParser>;
@@ -69,33 +67,38 @@ mod tests {
             ServerMessage::NewConnection(c) => c,
         };
 
-        //
-        // client_hdl.register_event_listener(event_tx.clone()).await;
-        // server_hdl.register_event_listener(event_tx.clone()).await;
-
-        client_hdl.event(event.to_string()).await;
+        client_hdl
+            .event(event.to_string())
+            .await
+            .expect("Problem sending event.");
         let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
             .await
             .expect("Timeout getting event.")
             .expect("Problem unwrapping event.");
-        println!("Event: {:#?}", recv_event);
         match recv_event {
             ConnectionEvent::Close => panic!("Got close from server."),
             ConnectionEvent::EventMessage(e) => assert_eq!(e, event.to_string()),
             ConnectionEvent::RequestMessage(_) => panic!("Got request from server."),
         }
 
-        server_hdl.event(event.to_string()).await;
+        server_hdl
+            .event(event.to_string())
+            .await
+            .expect("Problem sending event.");
         let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
             .await
             .expect("Timeout getting event.")
             .expect("Problem unwrapping event.");
-        println!("Event: {:#?}", recv_event);
         match recv_event {
             ConnectionEvent::Close => panic!("Got close from client."),
             ConnectionEvent::EventMessage(e) => assert_eq!(e, event.to_string()),
             ConnectionEvent::RequestMessage(_) => panic!("Got request from client."),
         }
+
+        close_tx
+            .send(())
+            .await
+            .expect("Problem sending close message to the server.");
     }
 
     #[derive(Debug, Clone)]
@@ -133,7 +136,7 @@ mod tests {
                         .expect("Problem upgrading stream to a websocket.");
 
                     let connection_hdl = ConnectionHdl::new(ws_stream, event_tx.clone()).await;
-                    server_tx.send(ServerMessage::NewConnection(connection_hdl)).await;
+                    server_tx.send(ServerMessage::NewConnection(connection_hdl)).await.expect("Problem sending new connection message");
                     ControlFlow::Continue(())
                 },
                 _ = rx.recv() => { ControlFlow::Break(()) }

@@ -2,7 +2,6 @@ use crate::error::SendError;
 use crate::server::{acceptor::ListenersAcceptorHandle, error::ListenAddrError};
 use std::net::SocketAddr;
 use tokio::io;
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 use super::Listener;
@@ -20,23 +19,6 @@ pub enum ListenerMessage {
 
 /// Used to access a Listener.
 /// Listener listens for incoming tcp connections.
-///
-/// # Examples
-///
-// ```
-// # tokio_test::block_on(async {
-// use websocket::server::ListenerHandle;
-//
-// let (tx, _rx) = tokio::sync::mpsc::channel(1);
-// let ip = "127.0.0.1";
-// let handle = ListenerHandle::new(tx, format!("{ip}:0").to_string()).await
-//     .expect("Problem binding to address");
-//
-// let address = handle.get_addr().await.expect("Problem getting address.");
-// assert_eq!(address.ip().to_string(), ip.to_string());
-//
-// # })
-// ```
 #[derive(Debug, Clone)]
 pub struct ListenerHandle {
     tx: mpsc::Sender<ListenerMessage>,
@@ -48,6 +30,7 @@ impl ListenerHandle {
     /// function will return an error.
     ///
     /// # Arguments
+    /// * `acceptor_hdl` - Acceptor to pass tcp connections on to.
     /// * `addr` - Ip and Port to listen on.
     pub async fn new(acceptor_hdl: ListenersAcceptorHandle, addr: String) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel(1);
@@ -58,6 +41,7 @@ impl ListenerHandle {
         Ok(ListenerHandle { tx })
     }
 
+    /// Closes the listener.
     pub async fn close(&self) -> Result<(), SendError> {
         self.tx
             .send(ListenerMessage::Close)
@@ -80,6 +64,6 @@ impl ListenerHandle {
             .map_err(|_| ListenAddrError::SendError)?;
         let addr = rx.await.map_err(|_| ListenAddrError::RecvError)?;
 
-        return addr.map_err(|e| ListenAddrError::Io(e));
+        addr.map_err(ListenAddrError::Io)
     }
 }

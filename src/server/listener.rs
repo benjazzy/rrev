@@ -5,9 +5,8 @@ use std::ops::ControlFlow;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::{io, net};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
-use crate::sender_manager::SenderManager;
 use crate::server::acceptor::ListenersAcceptorHandle;
 pub use listener_handle::ListenerHandle;
 use listener_handle::ListenerMessage;
@@ -18,9 +17,10 @@ struct Listener {
     /// Listens for messages from the handler.
     rx: mpsc::Receiver<ListenerMessage>,
 
+    /// Allows the listener to pass tcp connections on to the acceptor.
     acceptor_hdl: ListenersAcceptorHandle,
 
-    // Tcp socket to listen for connections on.
+    /// Tcp socket to listen for connections on.
     socket: net::TcpListener,
 }
 
@@ -99,8 +99,16 @@ impl Listener {
         ControlFlow::Continue(())
     }
 
+    /// Passes a new stream on to our acceptor handle.
+    ///
+    /// # Arguments
+    /// * `stream` - The new tcp stream.
+    /// * `addr` - The address of the new tcp stream.
     async fn handle_new_stream(&self, stream: TcpStream, addr: SocketAddr) -> ControlFlow<()> {
-        self.acceptor_hdl.new_stream(stream, addr).await;
+        if self.acceptor_hdl.new_stream(stream, addr).await.is_err() {
+            warn!("Problem sending new stream to acceptor. Exiting.");
+            return ControlFlow::Break(());
+        }
 
         ControlFlow::Continue(())
     }
@@ -111,7 +119,6 @@ mod tests {
     use crate::server::acceptor::{AcceptorHandle, AcceptorMessage};
     use crate::server::listener::ListenerHandle;
     use std::assert_matches::assert_matches;
-    use std::net::SocketAddr;
     use std::str;
     use std::time::Duration;
     use tokio::io;
@@ -154,6 +161,7 @@ mod tests {
         assert_matches!(error.kind(), io::ErrorKind::AddrNotAvailable);
     }
 
+    // Check that Listener will pass new connections onto its acceptor
     #[tokio::test]
     async fn check_connect() {
         let message = "test message";
@@ -190,7 +198,7 @@ mod tests {
             .write_all(message.as_bytes())
             .await
             .expect("Problem sending message to server.");
-        let recv_message = server_stream
+        let _ = server_stream
             .read_exact(&mut buf)
             .await
             .expect("Problem reading message.");
