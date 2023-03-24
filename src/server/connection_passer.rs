@@ -19,7 +19,9 @@ pub async fn pass_messages<P: Parser>(
     loop {
         match rx.recv().await {
             Some(event) => {
-                server_hdl.new_connection_event(event, addr).await;
+                if server_hdl.new_connection_event(event, addr).await.is_err() {
+                    break;
+                }
             }
             None => {
                 warn!("Problem passing connection event to server {addr}");

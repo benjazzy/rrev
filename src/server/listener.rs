@@ -105,7 +105,10 @@ impl Listener {
     /// * `stream` - The new tcp stream.
     /// * `addr` - The address of the new tcp stream.
     async fn handle_new_stream(&self, stream: TcpStream, addr: SocketAddr) -> ControlFlow<()> {
-        self.acceptor_hdl.new_stream(stream, addr).await;
+        if self.acceptor_hdl.new_stream(stream, addr).await.is_err() {
+            warn!("Problem sending new stream to acceptor. Exiting.");
+            return ControlFlow::Break(())
+        }
 
         ControlFlow::Continue(())
     }

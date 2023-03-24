@@ -93,56 +93,67 @@ impl<P: Parser> Connection<P> {
         debug!("Connection closing.");
         self.close().await;
         self.cancel_requests().await;
-        self.event_tx.send(ConnectionEvent::Close).await;
+        if self.event_tx.send(ConnectionEvent::Close).await.is_err() {
+            warn!("Could not notify of connection close.");
+        }
     }
 
     async fn handle_external(&mut self, message: ConnectionMessage<P>) -> ControlFlow<()> {
         match message {
             ConnectionMessage::Event(event) => {
-                self.sender_hdl.send(internal::Message::Event(event)).await;
-            }
-            ConnectionMessage::Request { data, tx } => {
-                self.send_request(data, tx).await;
-            }
-            ConnectionMessage::Close => {
-                return ControlFlow::Break(());
-            }
-        }
+                if self.sender_hdl.send(internal::Message::Event(event)).await.is_ok() {
+                    ControlFlow::Continue(())
+                } else {
+                    warn!("Problem sending websocket message. Exiting.");
 
-        ControlFlow::Continue(())
+                    ControlFlow::Break(())
+                }
+            }
+            ConnectionMessage::Request { data, tx } => self.send_request(data, tx).await,
+            ConnectionMessage::Close => ControlFlow::Break(()),
+        }
     }
 
     async fn handle_internal(&mut self, message: InternalMessage<P>) -> ControlFlow<()> {
         match message {
             InternalMessage::Close => {
-                return ControlFlow::Break(());
+                ControlFlow::Break(())
             }
             InternalMessage::NewMessage(message) => {
-                self.handle_internal_new_message(message).await;
+                self.handle_internal_new_message(message).await
             }
         }
-
-        ControlFlow::Continue(())
     }
 
     async fn handle_internal_new_message(
         &mut self,
         message: internal::Message<P::TheirRequest, P::TheirReply, P::TheirEvent>,
-    ) {
+    ) -> ControlFlow<()> {
         match message {
             internal::Message::Request(request) => self.handle_internal_request(request).await,
-            internal::Message::Reply(reply) => self.handle_internal_reply(reply).await,
+            internal::Message::Reply(reply) => {
+                self.handle_internal_reply(reply).await;
+
+                ControlFlow::Continue(())
+            },
             internal::Message::Event(event) => {
-                self.handle_internal_event(event).await;
+                self.handle_internal_event(event).await
             }
         }
     }
 
-    async fn handle_internal_request(&self, request: internal::Request<P::TheirRequest>) {
+    async fn handle_internal_request(&self, request: internal::Request<P::TheirRequest>) -> ControlFlow<()> {
         let handle = RequestHandle::new(request, self.sender_hdl.clone());
-        self.event_tx
+        if self.event_tx
             .send(ConnectionEvent::RequestMessage(handle))
-            .await;
+            .await
+            .is_err()
+        {
+            warn!("Problem sending request event. Exiting.");
+            return ControlFlow::Break(())
+        }
+
+        ControlFlow::Continue(())
     }
 
     async fn handle_internal_reply(&mut self, reply: internal::Reply<P::TheirReply>) {
@@ -155,27 +166,37 @@ impl<P: Parser> Connection<P> {
         };
     }
 
-    async fn handle_internal_event(&self, event: P::TheirEvent) {
-        self.event_tx
+    async fn handle_internal_event(&self, event: P::TheirEvent) -> ControlFlow<()> {
+        if self.event_tx
             .send(ConnectionEvent::EventMessage(event))
-            .await;
+            .await
+            .is_err()
+        {
+            return ControlFlow::Break(())
+        }
+
+        ControlFlow::Continue(())
     }
 
     async fn send_request(
         &mut self,
         data: P::OurRequest,
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
-    ) {
+    ) -> ControlFlow<()> {
         let id = self.next_id;
         self.next_id += 1;
         if self.reply_map.contains_key(&id) {
             warn!("Failed to send request. Request id has already been used.");
-            return;
+            return ControlFlow::Continue(());
         }
         self.reply_map.insert(id, tx);
 
         let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data });
-        self.sender_hdl.send(request).await;
+        if self.sender_hdl.send(request).await.is_err() {
+            return ControlFlow::Break(())
+        }
+
+        ControlFlow::Continue(())
     }
 
     async fn cancel_requests(&mut self) {
@@ -189,8 +210,8 @@ impl<P: Parser> Connection<P> {
     }
 
     async fn close(&mut self) {
-        self.receiver_hdl.close().await;
-        self.sender_hdl.close().await;
+        let _ = self.receiver_hdl.close().await;
+        let _ = self.sender_hdl.close().await;
     }
 }
 
@@ -236,7 +257,7 @@ mod tests {
         while let Some(message) = read.next().await {
             match message {
                 Ok(m) => {
-                    tx.send(m.to_string()).await;
+                    tx.send(m.to_string()).await.expect("Problem sending message back.");
                 }
                 Err(_) => break,
             }
@@ -390,7 +411,7 @@ mod tests {
         let (server_tx, _server_rx) = mpsc::channel(1);
         let connection_hdl = server(socket, server_tx).await;
 
-        connection_hdl.event(message.to_string()).await;
+        connection_hdl.event(message.to_string()).await.expect("Problem sending event.");
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
             .await
@@ -416,7 +437,7 @@ mod tests {
 
         let _connection_hdl = server(socket, server_tx).await;
 
-        client_tx.send(event_str).await;
+        client_tx.send(event_str).await.expect("Problem sending event.");
 
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
@@ -465,7 +486,7 @@ mod tests {
             .expect("Empty message.");
 
         if let ConnectionEvent::RequestMessage(r) = server_message {
-            r.complete(message.to_string()).await;
+            r.complete(message.to_string()).await.expect("Problem completing request.");
         } else {
             panic!("Server got incorrect message type.");
         }

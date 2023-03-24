@@ -41,8 +41,8 @@ impl ListenersAcceptorHandle {
         ListenersAcceptorHandle { tx }
     }
 
-    pub async fn new_stream(&self, stream: TcpStream, addr: SocketAddr) {
-        self.tx.send(AcceptorMessage::NewStream(stream, addr)).await;
+    pub async fn new_stream(&self, stream: TcpStream, addr: SocketAddr) -> Result<(), SendError> {
+        self.tx.send(AcceptorMessage::NewStream(stream, addr)).await.map_err(|_| SendError)
     }
 }
 

@@ -132,7 +132,7 @@ impl<P: Parser> Server<P> {
                 self.new_connection(connection, addr).await;
             }
             ServerMessage::ConnectionEvent { event, from } => {
-                self.connection_event(event, from).await;
+                return self.connection_event(event, from).await;
             }
         };
 
@@ -196,7 +196,7 @@ impl<P: Parser> Server<P> {
     /// # Arguments
     /// * `event` - Event received from a connection.
     /// * `addr` - Ip and port of the connection that send the event.
-    async fn connection_event(&mut self, event: connection::ConnectionEvent<P>, addr: SocketAddr) {
+    async fn connection_event(&mut self, event: connection::ConnectionEvent<P>, addr: SocketAddr) -> ControlFlow<()>{
         let server_event = match event {
             connection::ConnectionEvent::Close => {
                 if self.connections.remove(&addr).is_none() {
@@ -219,7 +219,12 @@ impl<P: Parser> Server<P> {
             }
         };
 
-        self.tx.send(server_event).await;
+        if self.tx.send(server_event).await.is_err() {
+            warn!("Problem sending event to user. Exiting.");
+            return ControlFlow::Break(());
+        }
+
+        ControlFlow::Continue(())
     }
 
     /// Sends a request to a connection.
@@ -229,13 +234,16 @@ impl<P: Parser> Server<P> {
     /// * `request` - The request to send.
     ///* `tx` -  The oneshot to reply on. Gets passed to the connection to reply with.
     async fn send_request(
-        &self,
+        &mut self,
         to: SocketAddr,
         request: P::OurRequest,
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     ) {
         if let Some(connection_hdl) = self.connections.get(&to) {
-            connection_hdl.request_with_sender(request, tx).await;
+            if connection_hdl.request_with_sender(request, tx).await.is_err() {
+                warn!("Problem sending message to connection {to}. Dropping.");
+                self.connections.remove(&to);
+            }
         } else {
             warn!("Unknown connection {to}.");
         }
@@ -246,9 +254,12 @@ impl<P: Parser> Server<P> {
     /// # Arguments
     /// * `to` - Ip and port of the connection that the event will be sent to.
     /// * `event` - Event to send.
-    async fn send_event(&self, to: SocketAddr, event: P::OurEvent) {
+    async fn send_event(&mut self, to: SocketAddr, event: P::OurEvent) {
         if let Some(connection_hdl) = self.connections.get(&to) {
-            connection_hdl.event(event).await;
+            if connection_hdl.event(event).await.is_err() {
+                warn!("Problem sending message to connection {to}. Dropping.");
+                self.connections.remove(&to);
+            }
         } else {
             warn!("Unknown connection {to}.");
         }
@@ -311,7 +322,7 @@ mod tests {
 
         // Connect with a client and check that a client was added.
         let url =
-            url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
+            url::Url::parse(format!("ws://{address}").as_str()).expect("Problem parsing url.");
         let (client_tx, _client_rx) = mpsc::channel(1);
         let _client_hdl = connect::<StringParser>(url, client_tx).await;
 
@@ -361,7 +372,7 @@ mod tests {
 
         // Connect with a client and check that a client was added.
         let url =
-            url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
+            url::Url::parse(format!("ws://{address}").as_str()).expect("Problem parsing url.");
 
         let (client_tx, _client_rx) = mpsc::channel(1);
 
@@ -392,7 +403,7 @@ mod tests {
         assert_eq!(connection_addr.ip().to_string(), ip.to_string());
 
         // Close the client and check that the server says there are no clients connected.
-        connection_hdl.close().await;
+        connection_hdl.close().await.expect("Problem closing connection.");
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
             .expect("Timeout receiving message from server.")
@@ -436,7 +447,7 @@ mod tests {
 
         // Connect with a client and check that a client was added.
         let url =
-            url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
+            url::Url::parse(format!("ws://{address}").as_str()).expect("Problem parsing url.");
 
         let (client_tx, client_rx) = mpsc::channel(1);
 
@@ -466,7 +477,7 @@ mod tests {
             };
 
             assert_eq!(*client_request.get_request(), request.to_string());
-            client_request.complete(test_reply.to_string()).await;
+            client_request.complete(test_reply.to_string()).await.expect("Problem completing request.");
         };
 
         // Start the client listening for and replying to the request in the background.
@@ -506,7 +517,7 @@ mod tests {
 
         // Connect with a client and check that a client was added.
         let url =
-            url::Url::parse(format!("ws://{}", address).as_str()).expect("Problem parsing url.");
+            url::Url::parse(format!("ws://{address}").as_str()).expect("Problem parsing url.");
 
         let (client_tx, mut client_rx) = mpsc::channel(1);
 
@@ -523,7 +534,7 @@ mod tests {
         assert_eq!(first.ip().to_string(), ip.to_string());
 
         // Send event.
-        server_hdl.event(*first, event.to_string()).await;
+        server_hdl.event(*first, event.to_string()).await.expect("Problem sending event");
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
             .await
