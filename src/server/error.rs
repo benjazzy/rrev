@@ -1,5 +1,4 @@
 /// Contains types of errors that can by produced in the server module.
-
 use std::fmt::Formatter;
 
 /// Con be produced when getting the listen address.

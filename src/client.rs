@@ -67,7 +67,10 @@ mod tests {
             ServerMessage::NewConnection(c) => c,
         };
 
-        client_hdl.event(event.to_string()).await.expect("Problem sending event.");
+        client_hdl
+            .event(event.to_string())
+            .await
+            .expect("Problem sending event.");
         let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
             .await
             .expect("Timeout getting event.")
@@ -78,7 +81,10 @@ mod tests {
             ConnectionEvent::RequestMessage(_) => panic!("Got request from server."),
         }
 
-        server_hdl.event(event.to_string()).await.expect("Problem sending event.");
+        server_hdl
+            .event(event.to_string())
+            .await
+            .expect("Problem sending event.");
         let recv_event = tokio::time::timeout(Duration::from_millis(100), event_rx.recv())
             .await
             .expect("Timeout getting event.")

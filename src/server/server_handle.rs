@@ -52,10 +52,7 @@ pub enum ServerMessage<P: Parser> {
     /// # Arguments
     /// * `to` - Client url to send the event to.
     /// * `event` - Event to send.
-    SendEvent {
-        to: SocketAddr,
-        event: P::OurEvent,
-    },
+    SendEvent { to: SocketAddr, event: P::OurEvent },
 }
 
 /// Used by the user to manage the server externally.

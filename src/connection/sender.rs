@@ -158,7 +158,9 @@ mod tests {
         while let Some(message) = read.next().await {
             match message {
                 Ok(m) => {
-                    tx.send(m.to_string()).await.expect("Problem sending message to test");
+                    tx.send(m.to_string())
+                        .await
+                        .expect("Problem sending message to test");
                 }
                 Err(_) => break,
             }
@@ -207,7 +209,10 @@ mod tests {
         tokio::spawn(client(addr, client_tx));
         let sender_hdl = server(socket).await;
 
-        sender_hdl.send(request.clone()).await.expect("Problem sending message");
+        sender_hdl
+            .send(request.clone())
+            .await
+            .expect("Problem sending message");
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
             .await

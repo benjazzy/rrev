@@ -1,10 +1,10 @@
+use crate::error::SendError;
 use crate::parser::Parser;
 use crate::server::acceptor::Acceptor;
 use crate::server::server_handle::AcceptorsServerHandle;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use crate::error::SendError;
 
 #[derive(Debug)]
 pub enum AcceptorMessage {
@@ -30,9 +30,12 @@ impl AcceptorHandle {
 
         AcceptorHandle { tx }
     }
-    
+
     pub async fn close(&self) -> Result<(), SendError> {
-        self.tx.send(AcceptorMessage::Close).await.map_err(|_| SendError)
+        self.tx
+            .send(AcceptorMessage::Close)
+            .await
+            .map_err(|_| SendError)
     }
 }
 
@@ -42,7 +45,10 @@ impl ListenersAcceptorHandle {
     }
 
     pub async fn new_stream(&self, stream: TcpStream, addr: SocketAddr) -> Result<(), SendError> {
-        self.tx.send(AcceptorMessage::NewStream(stream, addr)).await.map_err(|_| SendError)
+        self.tx
+            .send(AcceptorMessage::NewStream(stream, addr))
+            .await
+            .map_err(|_| SendError)
     }
 }
 

@@ -118,7 +118,7 @@ impl<P: Parser> Server<P> {
     /// Returns [ControlFlow::Break] if the server should close.
     /// # Arguments
     /// * `message` - ServerMessage to handle.
-    async fn handle_message(&mut self, message: ServerMessage<P>) -> ControlFlow<()>{
+    async fn handle_message(&mut self, message: ServerMessage<P>) -> ControlFlow<()> {
         match message {
             ServerMessage::Close => return ControlFlow::Break(()),
             ServerMessage::GetListenAddress(tx) => self.get_listen_address(tx).await,
@@ -181,7 +181,12 @@ impl<P: Parser> Server<P> {
         }
         self.connections.insert(addr, connection);
 
-        if self.tx.send(ServerEvent::NewConnection(addr)).await.is_err() {
+        if self
+            .tx
+            .send(ServerEvent::NewConnection(addr))
+            .await
+            .is_err()
+        {
             warn!("Could not send new connection to user.");
         }
     }
@@ -196,7 +201,11 @@ impl<P: Parser> Server<P> {
     /// # Arguments
     /// * `event` - Event received from a connection.
     /// * `addr` - Ip and port of the connection that send the event.
-    async fn connection_event(&mut self, event: connection::ConnectionEvent<P>, addr: SocketAddr) -> ControlFlow<()>{
+    async fn connection_event(
+        &mut self,
+        event: connection::ConnectionEvent<P>,
+        addr: SocketAddr,
+    ) -> ControlFlow<()> {
         let server_event = match event {
             connection::ConnectionEvent::Close => {
                 if self.connections.remove(&addr).is_none() {
@@ -240,7 +249,11 @@ impl<P: Parser> Server<P> {
         tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
     ) {
         if let Some(connection_hdl) = self.connections.get(&to) {
-            if connection_hdl.request_with_sender(request, tx).await.is_err() {
+            if connection_hdl
+                .request_with_sender(request, tx)
+                .await
+                .is_err()
+            {
                 warn!("Problem sending message to connection {to}. Dropping.");
                 self.connections.remove(&to);
             }
@@ -403,7 +416,10 @@ mod tests {
         assert_eq!(connection_addr.ip().to_string(), ip.to_string());
 
         // Close the client and check that the server says there are no clients connected.
-        connection_hdl.close().await.expect("Problem closing connection.");
+        connection_hdl
+            .close()
+            .await
+            .expect("Problem closing connection.");
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
             .expect("Timeout receiving message from server.")
@@ -464,7 +480,9 @@ mod tests {
         assert_eq!(first.ip().to_string(), ip.to_string());
 
         // Allows the client to reply to the request in the background.
-        let reply_closure = async move |mut client_rx: mpsc::Receiver<ConnectionEvent<StringParser>>| {
+        let reply_closure = async move |mut client_rx: mpsc::Receiver<
+            ConnectionEvent<StringParser>,
+        >| {
             let client_event = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
                 .await
                 .expect("Timeout receiving")
@@ -477,7 +495,10 @@ mod tests {
             };
 
             assert_eq!(*client_request.get_request(), request.to_string());
-            client_request.complete(test_reply.to_string()).await.expect("Problem completing request.");
+            client_request
+                .complete(test_reply.to_string())
+                .await
+                .expect("Problem completing request.");
         };
 
         // Start the client listening for and replying to the request in the background.
@@ -534,7 +555,10 @@ mod tests {
         assert_eq!(first.ip().to_string(), ip.to_string());
 
         // Send event.
-        server_hdl.event(*first, event.to_string()).await.expect("Problem sending event");
+        server_hdl
+            .event(*first, event.to_string())
+            .await
+            .expect("Problem sending event");
 
         let client_message = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
             .await

@@ -7,9 +7,9 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::MaybeTlsStream;
 use tracing::{debug, warn};
 
-use crate::server::connection_passer;
 use crate::connection::ConnectionHdl;
 use crate::parser::Parser;
+use crate::server::connection_passer;
 use crate::server::server_handle::AcceptorsServerHandle;
 pub use acceptor_handle::{AcceptorHandle, AcceptorMessage, ListenersAcceptorHandle};
 
@@ -72,7 +72,12 @@ impl<P: Parser> Acceptor<P> {
                     self.server_hdl.clone().into(),
                     addr,
                 ));
-                if self.server_hdl.new_connection(connection_hdl, addr).await.is_err() {
+                if self
+                    .server_hdl
+                    .new_connection(connection_hdl, addr)
+                    .await
+                    .is_err()
+                {
                     warn!("Problem sending connection handle to server. Exiting.");
                     return ControlFlow::Break(());
                 }

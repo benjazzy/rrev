@@ -3,7 +3,7 @@ use crate::parser::Parser;
 use crate::server::server_handle::PassersServerHandle;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::debug;
 
 /// Passes events from a connection to a server with the connection address.
 ///
@@ -16,17 +16,11 @@ pub async fn pass_messages<P: Parser>(
     server_hdl: PassersServerHandle<P>,
     addr: SocketAddr,
 ) {
-    loop {
-        match rx.recv().await {
-            Some(event) => {
-                if server_hdl.new_connection_event(event, addr).await.is_err() {
-                    break;
-                }
-            }
-            None => {
-                warn!("Problem passing connection event to server {addr}");
-                break;
-            }
+    while let Some(event) = rx.recv().await {
+        if server_hdl.new_connection_event(event, addr).await.is_err() {
+            break;
         }
     }
+
+    debug!("Passer exiting {addr}.");
 }
