@@ -24,8 +24,14 @@ pub enum ServerMessage<P: Parser> {
     /// The oneshot allows the server to send back the clients.
     GetClients(oneshot::Sender<Result<Vec<SocketAddr>, ClientsError>>),
 
+    /// Informs the server of a new connection.
+    /// Contains the ConnectionHandle and the address of the connection.
     NewConnection(ConnectionHdl<P>, SocketAddr),
 
+    /// Informs the server of a new [ConnectionEvent] from a connection.
+    /// This event originates from a connection_passer.
+    /// Contains the address from where the ConnectionEvent
+    /// came from and the event from the connection.
     ConnectionEvent {
         from: SocketAddr,
         event: ConnectionEvent<P>,
@@ -34,6 +40,7 @@ pub enum ServerMessage<P: Parser> {
     /// Sends a request to a client.
     /// # Arguments
     /// * `to` - Client url to send the request to.
+    /// * `tx` - The oneshot to send the reply over.
     /// * `request` - Request to send.
     SendRequest {
         to: SocketAddr,
@@ -51,21 +58,21 @@ pub enum ServerMessage<P: Parser> {
     },
 }
 
-/// Used to manage the server externally.
+/// Used by the user to manage the server externally.
 #[derive(Debug, Clone)]
 pub struct ServerHandle<P: Parser> {
     /// Sender to send ServerMessages to the server.
     tx: mpsc::Sender<ServerMessage<P>>,
 }
 
-/// Used to manage the server externally.
+/// Used by an acceptor to manage the server externally.
 #[derive(Debug, Clone)]
 pub struct AcceptorsServerHandle<P: Parser> {
     /// Sender to send ServerMessages to the server.
     tx: mpsc::Sender<ServerMessage<P>>,
 }
 
-/// Used to manage the server externally.
+/// Used by a connection_passer to manage the server externally.
 #[derive(Debug, Clone)]
 pub struct PassersServerHandle<P: Parser> {
     /// Sender to send ServerMessages to the server.
@@ -77,7 +84,8 @@ impl<P: Parser> ServerHandle<P> {
     /// Returns the handler and starts the Server.
     ///
     /// # Arguments
-    /// * `listen_addr` - Addresses to listen on
+    /// * `listen_addr` - Addresses to listen on.
+    /// * `server_event_tx` - Sender to send [ServerEvents] over.
     pub async fn new(
         listen_addr: String,
         server_event_tx: mpsc::Sender<ServerEvent<P>>,
@@ -98,6 +106,7 @@ impl<P: Parser> ServerHandle<P> {
             .map_err(|_| SendError)
     }
 
+    /// Gets the listen address of the server.
     pub async fn get_listen_address(&self) -> Result<SocketAddr, ListenAddrError> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -112,6 +121,7 @@ impl<P: Parser> ServerHandle<P> {
         }
     }
 
+    /// Gets the currently connected clients from the server.
     pub async fn get_clients(&self) -> Result<Vec<SocketAddr>, ClientsError> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -126,6 +136,11 @@ impl<P: Parser> ServerHandle<P> {
         }
     }
 
+    /// Send a request to a connected client.
+    ///
+    /// # Arguments
+    /// * `to` Address of the connection to send the request to.
+    /// * `request` The request to send.
     pub async fn request(
         &self,
         to: SocketAddr,
@@ -143,6 +158,13 @@ impl<P: Parser> ServerHandle<P> {
         }
     }
 
+    /// Send a request to a connection but with a timeout.
+    /// Calls request() but has a timeout.
+    ///
+    /// # Arguments
+    /// * `to` - The address of the connection to send the request to.
+    /// * `request` - The request to send.
+    /// * `timeout` - The timeout before the request will be canceled.
     pub async fn request_timeout(
         &self,
         to: SocketAddr,
@@ -155,6 +177,11 @@ impl<P: Parser> ServerHandle<P> {
         }
     }
 
+    /// Send an event to a connection
+    ///
+    /// # Arguments
+    /// * `to` - Address of the connection to send the event to.
+    /// * `event` - The event to send.
     pub async fn event(&self, to: SocketAddr, event: P::OurEvent) -> Result<(), SendError> {
         self.tx
             .send(ServerMessage::SendEvent { to, event })
@@ -176,6 +203,7 @@ impl<P: Parser> AcceptorsServerHandle<P> {
     ///
     /// # Arguments
     /// * `connection_hdl` - The handle of the new connection.
+    /// * `addr` - The address of the new connection.
     pub async fn new_connection(
         &self,
         connection_hdl: ConnectionHdl<P>,
@@ -189,6 +217,11 @@ impl<P: Parser> AcceptorsServerHandle<P> {
 }
 
 impl<P: Parser> PassersServerHandle<P> {
+    /// Pass a new connection event to the server.
+    ///
+    /// # Arguments
+    /// * `event` - The new event.
+    /// * `from` - The address where the event came from.
     pub async fn new_connection_event(
         &self,
         event: ConnectionEvent<P>,
