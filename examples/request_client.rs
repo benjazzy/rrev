@@ -1,8 +1,8 @@
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use websocket::client;
-use websocket::parser::StringParser;
+use rrev::client;
+use rrev::parser::StringParser;
 
 #[tokio::main]
 async fn main() {

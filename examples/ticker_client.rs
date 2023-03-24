@@ -1,9 +1,9 @@
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use websocket::client;
-use websocket::client::ConnectionEvent;
-use websocket::parser::StringParser;
+use rrev::client;
+use rrev::client::ConnectionEvent;
+use rrev::parser::StringParser;
 
 async fn receive_events(mut rx: mpsc::Receiver<ConnectionEvent<StringParser>>) {
     info!("Listening for messages.");

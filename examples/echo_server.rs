@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use websocket::parser::StringParser;
-use websocket::server::{ServerEvent, ServerHandle};
+use rrev::parser::StringParser;
+use rrev::server::{ServerEvent, ServerHandle};
 
 #[tokio::main]
 async fn main() {
