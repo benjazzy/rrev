@@ -35,13 +35,8 @@ impl<P: Parser> Acceptor<P> {
 
     /// Starts listing for new tcp streams.
     pub async fn run(mut self) {
-        loop {
-            let message_option = self.rx.recv().await;
-            if let Some(message) = message_option {
-                if self.handle_message(message).await.is_break() {
-                    break;
-                }
-            } else {
+        while let Some(message) = self.rx.recv().await {
+            if self.handle_message(message).await.is_break() {
                 break;
             }
         }
@@ -51,11 +46,9 @@ impl<P: Parser> Acceptor<P> {
     /// Returns [ControlFlow::Break] if the Acceptor should exit.
     async fn handle_message(&mut self, message: AcceptorMessage) -> ControlFlow<()> {
         match message {
-            AcceptorMessage::Close => return ControlFlow::Break(()),
+            AcceptorMessage::Close => ControlFlow::Break(()),
             AcceptorMessage::NewStream(stream, addr) => self.accept_stream(stream, addr).await,
         }
-
-        ControlFlow::Continue(())
     }
 
     /// Turns a tcp stream into a websocket stream.
@@ -65,7 +58,7 @@ impl<P: Parser> Acceptor<P> {
     /// # Arguments
     /// * `stream` - Tcp stream to accept.
     /// * `addr` - Address of the peer of `stream`.
-    async fn accept_stream(&mut self, stream: TcpStream, addr: SocketAddr) {
+    async fn accept_stream(&mut self, stream: TcpStream, addr: SocketAddr) -> ControlFlow<()> {
         let maybe_tls = MaybeTlsStream::Plain(stream);
         let ws_stream = tokio_tungstenite::accept_async(maybe_tls).await;
 
@@ -79,11 +72,16 @@ impl<P: Parser> Acceptor<P> {
                     self.server_hdl.clone().into(),
                     addr,
                 ));
-                self.server_hdl.new_connection(connection_hdl, addr).await;
+                if self.server_hdl.new_connection(connection_hdl, addr).await.is_err() {
+                    warn!("Problem sending connection handle to server. Exiting.");
+                    return ControlFlow::Break(());
+                }
             }
             Err(e) => {
                 warn!("Problem accepting new websocket stream from address: {addr}. {e}");
             }
         }
+
+        ControlFlow::Continue(())
     }
 }
