@@ -4,6 +4,7 @@ use crate::server::server_handle::AcceptorsServerHandle;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use crate::error::SendError;
 
 #[derive(Debug)]
 pub enum AcceptorMessage {
@@ -28,6 +29,10 @@ impl AcceptorHandle {
         tokio::spawn(acceptor.run());
 
         AcceptorHandle { tx }
+    }
+    
+    pub async fn close(&self) -> Result<(), SendError> {
+        self.tx.send(AcceptorMessage::Close).await.map_err(|_| SendError)
     }
 }
 

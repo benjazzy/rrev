@@ -1,8 +1,6 @@
 #![feature(assert_matches)]
 #![feature(async_closure)]
 
-extern crate core;
-
 pub mod client;
 mod connection;
 pub mod error;

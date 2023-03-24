@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use tracing::error;
+use tracing::{error, warn};
 
 use super::internal_hdl;
 
@@ -77,6 +77,18 @@ impl<P: Parser> Sender<P> {
         };
 
         if let Err(e) = self.ws_sender.send(Message::Text(message_str)).await {
+            use tokio_tungstenite::tungstenite::error::Error;
+            match e {
+                Error::ConnectionClosed => {
+                    warn!("Could not send websocket message because connection is already closed.");
+                    self.connection_hdl.close().await
+                }
+                Error::Protocol(_) | Error::Utf8 => {
+                    error!("Unrecoverable websocket error. Closing.");
+                    self.connection_hdl.close().await;
+                }
+                _ => {}
+            }
             error!("Problem sending websocket message. {e}");
         }
     }
