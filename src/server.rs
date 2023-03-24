@@ -266,16 +266,19 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::mpsc;
 
+    // Check if we can get the listen addres of a running server.
     #[tokio::test]
     async fn check_get_address() {
         let ip = "127.0.0.1";
 
+        // Start the server.
         let (server_tx, _server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
                 .expect("Problem starting server");
 
+        // Get the listen address of the server.
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
                 .await
@@ -285,16 +288,19 @@ mod tests {
         assert_eq!(address.ip().to_string(), ip.to_string());
     }
 
+    // Check that a client can connect to the server and the server sends a new connection event.
     #[tokio::test]
     async fn check_connect() {
         let ip = "127.0.0.1";
 
+        // Start the server.
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
                 .expect("Problem starting server");
 
+        // Get the listen address of the server.
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
                 .await
@@ -314,24 +320,30 @@ mod tests {
             .expect("Timeout getting server message.")
             .expect("Problem getting server message.");
 
+        // Check that the server_message was a NewConnection.
         let connection_addr = if let ServerEvent::NewConnection(addr) = server_message {
             addr
         } else {
             panic!("Did not receive new connection message from the server");
         };
 
+        // We don't know what port the client is using however we can check that the ip is correct.
         assert_eq!(connection_addr.ip().to_string(), ip.to_string());
     }
 
+    // Check that getting the connected clients from the server works.
     #[tokio::test]
     async fn check_get_clients() {
         let ip = "127.0.0.1";
+
+        // Start the server
         let (server_tx, mut server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
                 .expect("Problem starting server");
 
+        // Get the server's listen address.
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
                 .await
@@ -379,6 +391,7 @@ mod tests {
 
         assert_eq!(connection_addr.ip().to_string(), ip.to_string());
 
+        // Close the client and check that the server says there are no clients connected.
         connection_hdl.close().await;
         let server_message = tokio::time::timeout(Duration::from_millis(100), server_rx.recv())
             .await
@@ -398,17 +411,21 @@ mod tests {
         assert_eq!(clients, Vec::<SocketAddr>::new());
     }
 
+    // Check that the server is able to send a request to a client.
     #[tokio::test]
     async fn check_send_request() {
         let request = "test request";
         let test_reply = "test reply";
         let ip = "127.0.0.1";
+
+        // Start the server.
         let (server_tx, _server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
                 .expect("Problem starting server");
 
+        // Get the listen address of the server.
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
                 .await
@@ -435,7 +452,8 @@ mod tests {
         let first = clients.get(0).expect("Problem getting first client.");
         assert_eq!(first.ip().to_string(), ip.to_string());
 
-        let reply = async move |mut client_rx: mpsc::Receiver<ConnectionEvent<StringParser>>| {
+        // Allows the client to reply to the request in the background.
+        let reply_closure = async move |mut client_rx: mpsc::Receiver<ConnectionEvent<StringParser>>| {
             let client_event = tokio::time::timeout(Duration::from_millis(100), client_rx.recv())
                 .await
                 .expect("Timeout receiving")
@@ -451,26 +469,33 @@ mod tests {
             client_request.complete(test_reply.to_string()).await;
         };
 
-        tokio::spawn(reply(client_rx));
+        // Start the client listening for and replying to the request in the background.
+        tokio::spawn(reply_closure(client_rx));
 
+        // Send the request to the client.
         let server_reply = server_hdl
             .request_timeout(*first, request.to_string(), Duration::from_millis(100))
             .await
             .expect("Problem getting reply");
 
+        // Check the reply.
         assert_eq!(server_reply, test_reply.to_string());
     }
 
+    // Check that the server is able to send an event.
     #[tokio::test]
     async fn check_send_event() {
         let event = "test event";
         let ip = "127.0.0.1";
+
+        // Start the server.
         let (server_tx, _server_rx) = mpsc::channel(1);
         let server_hdl =
             ServerHandle::<StringParser>::new(format!("{ip}:0").to_string(), server_tx)
                 .await
                 .expect("Problem starting server");
 
+        // Get the listen address of the server.
         let address =
             tokio::time::timeout(Duration::from_millis(100), server_hdl.get_listen_address())
                 .await
