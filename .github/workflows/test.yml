@@ -21,10 +21,6 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly
           source "$HOME/.cargo/env"
           cargo --version
-          pwd
-          ls
-          ls src
-          cat /home/runner/work/websocket/websocket/Cargo.toml
       - name: Build
         run: |
           source "$HOME/.cargo/env"
