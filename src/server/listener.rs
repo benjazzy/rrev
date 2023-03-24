@@ -17,9 +17,10 @@ struct Listener {
     /// Listens for messages from the handler.
     rx: mpsc::Receiver<ListenerMessage>,
 
+    /// Allows the listener to pass tcp connections on to the acceptor.
     acceptor_hdl: ListenersAcceptorHandle,
 
-    // Tcp socket to listen for connections on.
+    /// Tcp socket to listen for connections on.
     socket: net::TcpListener,
 }
 
@@ -98,6 +99,11 @@ impl Listener {
         ControlFlow::Continue(())
     }
 
+    /// Passes a new stream on to our acceptor handle.
+    ///
+    /// # Arguments
+    /// * `stream` - The new tcp stream.
+    /// * `addr` - The address of the new tcp stream.
     async fn handle_new_stream(&self, stream: TcpStream, addr: SocketAddr) -> ControlFlow<()> {
         self.acceptor_hdl.new_stream(stream, addr).await;
 
@@ -152,6 +158,7 @@ mod tests {
         assert_matches!(error.kind(), io::ErrorKind::AddrNotAvailable);
     }
 
+    // Check that Listener will pass new connections onto its acceptor
     #[tokio::test]
     async fn check_connect() {
         let message = "test message";
