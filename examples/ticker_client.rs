@@ -1,9 +1,9 @@
-use std::time::Duration;
-use tokio::sync::mpsc;
-use tracing::{error, info};
 use rrev::client;
 use rrev::client::ConnectionEvent;
 use rrev::parser::StringParser;
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tracing::{error, info};
 
 async fn receive_events(mut rx: mpsc::Receiver<ConnectionEvent<StringParser>>) {
     info!("Listening for messages.");

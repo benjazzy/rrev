@@ -1,5 +1,6 @@
 #![feature(assert_matches)]
 #![feature(async_closure)]
+#![feature(async_fn_in_trait)]
 
 pub mod client;
 mod connection;

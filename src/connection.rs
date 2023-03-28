@@ -195,7 +195,7 @@ impl<P: Parser> Connection<P> {
         }
         self.reply_map.insert(id, tx);
 
-        let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data });
+        let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data: internal::RequestType::User(data) });
         if self.sender_hdl.send(request).await.is_err() {
             return ControlFlow::Break(());
         }

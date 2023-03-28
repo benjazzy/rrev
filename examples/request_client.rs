@@ -1,8 +1,8 @@
+use rrev::client;
+use rrev::parser::StringParser;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use rrev::client;
-use rrev::parser::StringParser;
 
 #[tokio::main]
 async fn main() {

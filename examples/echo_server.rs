@@ -1,7 +1,7 @@
-use tokio::sync::mpsc;
-use tracing::{error, info};
 use rrev::parser::StringParser;
 use rrev::server::{ServerEvent, ServerHandle};
+use tokio::sync::mpsc;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() {

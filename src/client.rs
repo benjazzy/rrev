@@ -14,6 +14,14 @@ pub async fn connect<P: Parser>(
     Ok(connection_hdl)
 }
 
+pub async fn connection_to_route<P: Parser>(
+    url: Url,
+    event_tx: mpsc::Sender<ConnectionEvent<P>>,
+    route: String,
+) -> Result<ConnectionHdl<P>, tungstenite::error::Error> {
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::client::connect;
