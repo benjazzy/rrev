@@ -27,8 +27,8 @@ pub use sender::SenderHdl;
 enum ConnectionMessage<P: Parser> {
     Close,
     Request {
-        data: P::OurRequest,
-        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
+        data: internal::RequestType<P::OurRequest>,
+        tx: oneshot::Sender<Result<internal::ReplyType<P::TheirReply>, RequestError>>,
     },
     Event(P::OurEvent),
 }
@@ -41,7 +41,8 @@ struct Connection<P: Parser> {
     rx: mpsc::Receiver<ConnectionMessage<P>>,
 
     next_id: usize,
-    reply_map: HashMap<usize, oneshot::Sender<Result<P::TheirReply, RequestError>>>,
+    reply_map:
+        HashMap<usize, oneshot::Sender<Result<internal::ReplyType<P::TheirReply>, RequestError>>>,
 
     event_tx: mpsc::Sender<ConnectionEvent<P>>,
 }
@@ -184,8 +185,8 @@ impl<P: Parser> Connection<P> {
 
     async fn send_request(
         &mut self,
-        data: P::OurRequest,
-        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
+        data: internal::RequestType<P::OurRequest>,
+        tx: oneshot::Sender<Result<internal::ReplyType<P::TheirReply>, RequestError>>,
     ) -> ControlFlow<()> {
         let id = self.next_id;
         self.next_id += 1;
@@ -195,7 +196,10 @@ impl<P: Parser> Connection<P> {
         }
         self.reply_map.insert(id, tx);
 
-        let request = internal::Message::Request(internal::Request::<P::OurRequest> { id, data: internal::RequestType::User(data) });
+        let request = internal::Message::Request(internal::Request::<P::OurRequest> {
+            id,
+            data,
+        });
         if self.sender_hdl.send(request).await.is_err() {
             return ControlFlow::Break(());
         }

@@ -2,10 +2,12 @@ use crate::connection::ConnectionEvent;
 use crate::error::SendError;
 use crate::error::{RequestError, TimeoutError};
 use crate::parser::Parser;
+use crate::scheme::internal;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use crate::scheme::internal::ReplyType;
 
 use super::{Connection, ConnectionMessage};
 
@@ -35,10 +37,10 @@ impl<P: Parser> ConnectionHdl<P> {
             .map_err(|_| SendError)
     }
 
-    pub async fn request_with_sender(
+    pub(crate) async fn internal_request_with_sender(
         &self,
-        request: P::OurRequest,
-        tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
+        request: internal::RequestType<P::OurRequest>,
+        tx: oneshot::Sender<Result<internal::ReplyType<P::TheirReply>, RequestError>>,
     ) -> Result<(), RequestError> {
         self.tx
             .send(ConnectionMessage::Request { data: request, tx })
@@ -46,12 +48,58 @@ impl<P: Parser> ConnectionHdl<P> {
             .map_err(|_| RequestError::SendError)
     }
 
-    pub async fn request(&self, request: P::OurRequest) -> Result<P::TheirReply, RequestError> {
+    pub(crate) async fn internal_request(
+        &self,
+        request: internal::RequestType<P::OurRequest>,
+    ) -> Result<internal::ReplyType<P::TheirReply>, RequestError> {
         let (tx, rx) = oneshot::channel();
-        self.request_with_sender(request, tx).await?;
+        self.internal_request_with_sender(request, tx).await?;
 
         match rx.await {
             Ok(r) => r,
+            Err(_) => Err(RequestError::RecvError),
+        }
+    }
+
+    pub(crate) async fn internal_request_timeout(
+        &self,
+        request: internal::RequestType<P::OurRequest>,
+        timeout: Duration
+    ) -> Result<internal::ReplyType<P::TheirReply>, TimeoutError> {
+        match tokio::time::timeout(timeout, self.internal_request(request)).await {
+            Ok(result) => result.map_err(TimeoutError::RequestError),
+            Err(_) => Err(TimeoutError::Timeout),
+        }
+    }
+
+    // pub async fn request_with_sender(
+    //     &self,
+    //     request: P::OurRequest,
+    //     tx: oneshot::Sender<Result<P::TheirReply, RequestError>>,
+    // ) -> Result<(), RequestError> {
+    //     self.tx
+    //         .send(ConnectionMessage::Request { data: internal::RequestType::User(request), tx })
+    //         .await
+    //         .map_err(|_| RequestError::SendError)
+    // }
+
+    pub async fn request(&self, request: P::OurRequest) -> Result<P::TheirReply, RequestError> {
+        let (tx, rx) = oneshot::channel();
+        self.internal_request_with_sender(internal::RequestType::User(request), tx).await?;
+
+        match rx.await {
+            Ok(r) => {
+                match r {
+                    Ok(r) => {
+                        if let ReplyType::User(u) = r {
+                            Ok(u)
+                        } else {
+                            Err(RequestError::RecvError)
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
+            },
             Err(_) => Err(RequestError::RecvError),
         }
     }
